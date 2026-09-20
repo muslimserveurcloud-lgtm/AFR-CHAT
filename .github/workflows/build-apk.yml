@@ -23,8 +23,15 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Installer le SDK Android (+ licences acceptées)
-        uses: android-actions/setup-android@v3
+      - name: Installer le SDK Android
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
+
+      - name: Installer Android 35 et Build Tools 35
+        run: |
+          sdkmanager --install "platforms;android-35" "build-tools;35.0.0"
+          yes | sdkmanager --licenses
 
       # --- Firebase ---------------------------------------------------------
       # Le plugin "com.google.gms.google-services" exige la présence de
