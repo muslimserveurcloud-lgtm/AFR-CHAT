@@ -1,0 +1,67 @@
+rules_version = '2';
+
+// Règles de sécurité Firebase Storage — AFR CHAT
+// Chaque utilisateur ne peut écrire que dans son propre dossier ({folder}/{ownerUid}/...).
+// La lecture des médias de conversation est autorisée à tout utilisateur connecté : l'URL de
+// téléchargement Firebase Storage contient un token non devinable, et n'est communiquée aux
+// participants que via les documents Firestore protégés par firestore.rules. Pour un contrôle
+// d'accès strict fichier par fichier, migrer vers des Cloud Functions générant des URLs
+// signées à durée limitée.
+
+service firebase.storage {
+  match /b/{bucket}/o {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwnerFolder(ownerUid) {
+      return isSignedIn() && request.auth.uid == ownerUid;
+    }
+
+    match /chat_images/{ownerUid}/{fileName} {
+      allow read: if isSignedIn();
+      allow write: if isOwnerFolder(ownerUid) && request.resource.size < 10 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    match /chat_videos/{ownerUid}/{fileName} {
+      allow read: if isSignedIn();
+      allow write: if isOwnerFolder(ownerUid) && request.resource.size < 100 * 1024 * 1024
+        && request.resource.contentType.matches('video/.*');
+    }
+
+    match /chat_files/{ownerUid}/{fileName} {
+      allow read: if isSignedIn();
+      allow write: if isOwnerFolder(ownerUid) && request.resource.size < 50 * 1024 * 1024;
+    }
+
+    match /voice_messages/{ownerUid}/{fileName} {
+      allow read: if isSignedIn();
+      allow write: if isOwnerFolder(ownerUid) && request.resource.size < 20 * 1024 * 1024
+        && request.resource.contentType.matches('audio/.*');
+    }
+
+    match /profile_photos/{ownerUid}/{fileName} {
+      allow read: if isSignedIn();
+      allow write: if isOwnerFolder(ownerUid) && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    match /group_photos/{ownerUid}/{fileName} {
+      allow read: if isSignedIn();
+      allow write: if isOwnerFolder(ownerUid) && request.resource.size < 5 * 1024 * 1024
+        && request.resource.contentType.matches('image/.*');
+    }
+
+    match /stories/{ownerUid}/{fileName} {
+      allow read: if isSignedIn();
+      allow write: if isOwnerFolder(ownerUid) && request.resource.size < 50 * 1024 * 1024;
+    }
+
+    // Tout le reste est refusé par défaut.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

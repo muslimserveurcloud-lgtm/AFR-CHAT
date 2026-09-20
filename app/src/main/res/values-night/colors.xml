@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Identité visuelle originale AFR CHAT (mode sombre) -->
+    <color name="afrchat_primary">#8B7FFF</color>
+    <color name="afrchat_primary_variant">#6C5CE7</color>
+    <color name="afrchat_secondary">#FF9776</color>
+    <color name="afrchat_background">#0F0E17</color>
+    <color name="afrchat_surface">#1A1825</color>
+    <color name="afrchat_on_primary">#0F0E17</color>
+    <color name="afrchat_on_background">#F2F1FA</color>
+    <color name="afrchat_bubble_out">#6C5CE7</color>
+    <color name="afrchat_bubble_in">#231F35</color>
+    <color name="afrchat_online_dot">#2ECC71</color>
+    <color name="afrchat_error">#FF6B6B</color>
+</resources>

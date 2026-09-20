@@ -1,0 +1,18 @@
+{
+  "_comment": "CECI EST UN GABARIT. Télécharge ton vrai google-services.json depuis la Console Firebase (Paramètres du projet > Vos applications > app Android com.afrchat.app) et place-le à app/google-services.json — sans le suffixe .example.",
+  "project_info": {
+    "project_number": "000000000000",
+    "project_id": "TON_ID_DE_PROJET_FIREBASE",
+    "storage_bucket": "TON_ID_DE_PROJET_FIREBASE.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:000000000000:android:0000000000000000",
+        "android_client_info": { "package_name": "com.afrchat.app" }
+      },
+      "api_key": [{ "current_key": "REMPLACE_MOI" }]
+    }
+  ],
+  "configuration_version": "1"
+}

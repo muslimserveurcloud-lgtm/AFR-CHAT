@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">AFR CHAT</string>
+    <string name="tagline">Parlez. Partagez. Rapprochez-vous.</string>
+
+    <!-- Auth -->
+    <string name="signup_title">Créer un compte</string>
+    <string name="login_title">Connexion</string>
+    <string name="first_name">Prénom</string>
+    <string name="last_name">Nom</string>
+    <string name="email_or_phone">E-mail ou numéro de téléphone</string>
+    <string name="password">Mot de passe</string>
+    <string name="confirm_password">Confirmer le mot de passe</string>
+    <string name="accept_terms">J\'accepte les conditions d\'utilisation</string>
+    <string name="signup_button">S\'inscrire</string>
+    <string name="login_button">Se connecter</string>
+    <string name="forgot_password">Mot de passe oublié ?</string>
+    <string name="no_account">Pas de compte ? Inscrivez-vous</string>
+    <string name="have_account">Déjà un compte ? Connectez-vous</string>
+
+    <!-- Main -->
+    <string name="conversations">Discussions</string>
+    <string name="groups">Groupes</string>
+    <string name="stories">Statuts</string>
+    <string name="calls">Appels</string>
+    <string name="settings">Paramètres</string>
+    <string name="search_hint">Rechercher une personne, un groupe, un message…</string>
+    <string name="new_conversation">Nouvelle discussion</string>
+
+    <!-- Chat -->
+    <string name="typing_indicator">est en train d\'écrire…</string>
+    <string name="online">en ligne</string>
+    <string name="offline">hors ligne</string>
+    <string name="message_hint">Message…</string>
+    <string name="sent">Envoyé</string>
+    <string name="delivered">Distribué</string>
+    <string name="read">Lu</string>
+
+    <!-- Notifications -->
+    <string name="notification_channel_messages">Messages</string>
+    <string name="notification_channel_calls">Appels</string>
+    <string name="new_message_generic">Nouveau message</string>
+</resources>

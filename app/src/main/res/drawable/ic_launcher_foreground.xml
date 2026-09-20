@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- Bulle de discussion principale, coins très arrondis, forme originale -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,26 C71,26 84,37.5 84,52 C84,62 78,70 68.5,74.5 L70,86 L58,77.5 C56.7,77.7 55.35,77.8 54,77.8 C37,77.8 24,66.5 24,52 C24,37.5 37,26 54,26 Z"/>
+    <!-- Deux points de conversation -->
+    <path android:fillColor="#5B4FE9" android:pathData="M42,52 m-5,0 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0"/>
+    <path android:fillColor="#5B4FE9" android:pathData="M66,52 m-5,0 a5,5 0 1,0 10,0 a5,5 0 1,0 -10,0"/>
+    <!-- Étincelle de connexion (identité AFR CHAT) -->
+    <path android:fillColor="#FF7A59" android:pathData="M82,20 L85,27 L92,30 L85,33 L82,40 L79,33 L72,30 L79,27 Z"/>
+</vector>
