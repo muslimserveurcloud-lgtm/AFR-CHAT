@@ -1,0 +1,22 @@
+*.iml
+.gradle
+/local.properties
+/.idea/
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+
+# Firebase — NE JAMAIS committer ces fichiers
+app/google-services.json
+firebase/scripts/serviceAccountKey.json
+
+# Signature release — NE JAMAIS committer
+*.jks
+*.keystore
+
+# Node (Cloud Functions)
+firebase/functions/node_modules/
+firebase-debug.log
