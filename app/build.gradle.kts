@@ -42,7 +42,6 @@ android {
 
     buildTypes {
         debug {
-            applicationIdSuffix = ".debug"
             isDebuggable = true
             buildConfigField("boolean", "IS_DEBUG", "true")
         }
