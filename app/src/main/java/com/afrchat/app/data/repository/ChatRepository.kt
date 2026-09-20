@@ -46,7 +46,8 @@ class ChatRepository @Inject constructor(
     }
 
     /** Crée ou récupère la conversation privée existante entre deux utilisateurs. */
-    suspend fun getOrCreatePrivateConversation(uidA: String, uidB: String): AfrResult<String> = try {
+    suspend fun getOrCreatePrivateConversation(uidA: String, uidB: String): AfrResult<String> {
+        return try {
         val existing = conversationsRef()
             .whereEqualTo("type", "private")
             .whereArrayContains("participantIds", uidA)

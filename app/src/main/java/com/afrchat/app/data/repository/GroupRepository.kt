@@ -19,7 +19,8 @@ class GroupRepository @Inject constructor(
     private fun groupsRef() = firestore.collection("groups")
     private fun conversationsRef() = firestore.collection("conversations")
 
-    suspend fun createGroup(name: String, ownerUid: String, memberUids: List<String>, photoUrl: String = ""): AfrResult<String> = try {
+    suspend fun createGroup(name: String, ownerUid: String, memberUids: List<String>, photoUrl: String = ""): AfrResult<String> {
+        return try {
         val groupDoc = groupsRef().document()
         val allMembers = (memberUids + ownerUid).distinct()
         val group = Group(
@@ -57,7 +58,8 @@ class GroupRepository @Inject constructor(
         awaitClose { reg.remove() }
     }
 
-    suspend fun addMembers(groupId: String, conversationId: String, uids: List<String>): AfrResult<Unit> = try {
+    suspend fun addMembers(groupId: String, conversationId: String, uids: List<String>): AfrResult<Unit> {
+        return try {
         groupsRef().document(groupId).update("memberUids", FieldValue.arrayUnion(*uids.toTypedArray())).await()
         conversationsRef().document(conversationId).update("participantIds", FieldValue.arrayUnion(*uids.toTypedArray())).await()
         AfrResult.Success(Unit)
@@ -65,7 +67,8 @@ class GroupRepository @Inject constructor(
         AfrResult.Error("Impossible d'ajouter ces membres.", e)
     }
 
-    suspend fun removeMember(groupId: String, conversationId: String, uid: String, requesterUid: String): AfrResult<Unit> = try {
+    suspend fun removeMember(groupId: String, conversationId: String, uid: String, requesterUid: String): AfrResult<Unit> {
+        return try {
         val group = groupsRef().document(groupId).get().await().toObject(Group::class.java)
             ?: return AfrResult.Error("Groupe introuvable.")
         if (requesterUid !in group.adminUids && requesterUid != uid) {
@@ -86,7 +89,8 @@ class GroupRepository @Inject constructor(
     suspend fun leaveGroup(groupId: String, conversationId: String, uid: String) =
         removeMember(groupId, conversationId, uid, requesterUid = uid)
 
-    suspend fun setAdmin(groupId: String, targetUid: String, requesterUid: String, isAdmin: Boolean): AfrResult<Unit> = try {
+    suspend fun setAdmin(groupId: String, targetUid: String, requesterUid: String, isAdmin: Boolean): AfrResult<Unit> {
+        return try {
         val group = groupsRef().document(groupId).get().await().toObject(Group::class.java)
             ?: return AfrResult.Error("Groupe introuvable.")
         if (requesterUid != group.ownerUid) return AfrResult.Error("Seul le propriétaire peut gérer les administrateurs.")
@@ -98,7 +102,8 @@ class GroupRepository @Inject constructor(
         AfrResult.Error("Action impossible.", e)
     }
 
-    suspend fun updateGroupInfo(groupId: String, name: String?, description: String?, photoUrl: String?): AfrResult<Unit> = try {
+    suspend fun updateGroupInfo(groupId: String, name: String?, description: String?, photoUrl: String?): AfrResult<Unit> {
+        return try {
         val updates = mutableMapOf<String, Any>()
         name?.let { updates["name"] = it }
         description?.let { updates["description"] = it }
