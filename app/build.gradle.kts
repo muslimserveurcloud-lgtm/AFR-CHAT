@@ -122,7 +122,7 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.9.1")
 
     // WebRTC (appels audio/vidéo) — build maintenu par webrtc-sdk (miroir Google WebRTC pour Android)
-    implementation("io.github.webrtc-sdk:android:125.6422.07.1")
+    implementation("io.github.webrtc-sdk:android:125.6422.07")
 
     // Permissions & médias
     implementation("androidx.exifinterface:exifinterface:1.3.7")
