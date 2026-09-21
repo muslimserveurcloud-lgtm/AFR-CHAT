@@ -96,3 +96,5 @@ class UserRepository @Inject constructor(
 }
 
 }
+
+}
