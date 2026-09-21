@@ -12,6 +12,7 @@ import javax.inject.Singleton
 /**
  * Gère l'inscription, la connexion, la déconnexion et la session utilisateur
  * via Firebase Authentication (e-mail/mot de passe).
+ * Le maintien de session est natif à Firebase Auth (jeton rafraîchi automatiquement).
  */
 @Singleton
 class AuthRepository @Inject constructor(
@@ -27,8 +28,7 @@ class AuthRepository @Inject constructor(
         return listener
     }
 
-    fun removeAuthListener(listener: FirebaseAuth.AuthStateListener) =
-        auth.removeAuthStateListener(listener)
+    fun removeAuthListener(listener: FirebaseAuth.AuthStateListener) = auth.removeAuthStateListener(listener)
 
     suspend fun signUp(
         firstName: String,
@@ -39,36 +39,24 @@ class AuthRepository @Inject constructor(
     ): AfrResult<String> {
         return try {
             val result = auth.createUserWithEmailAndPassword(email, password).await()
-            val uid = result.user?.uid
+        val uid = result.user?.uid ?: return AfrResult.Error("Impossible de créer le compte.")
 
-            if (uid == null) {
-                AfrResult.Error("Impossible de créer le compte.")
-            } else {
-                val user = User(
-                    uid = uid,
-                    firstName = firstName,
-                    lastName = lastName,
-                    email = email,
-                    phone = phone,
-                    privacy = PrivacySettings()
-                )
-
-                firestore.collection("users")
-                    .document(uid)
-                    .set(user)
-                    .await()
-
-                AfrResult.Success(uid)
-            }
+        val user = User(
+            uid = uid,
+            firstName = firstName,
+            lastName = lastName,
+            email = email,
+            phone = phone,
+            privacy = PrivacySettings()
+        )
+        firestore.collection("users").document(uid).set(user).await()
+        AfrResult.Success(uid)
         } catch (e: Exception) {
             AfrResult.Error(mapAuthError(e), e)
         }
     }
 
-    suspend fun login(
-        email: String,
-        password: String
-    ): AfrResult<String> {
+    suspend fun login(email: String, password: String): AfrResult<String> {
         return try {
             val result = auth.signInWithEmailAndPassword(email, password).await()
             AfrResult.Success(result.user?.uid.orEmpty())
@@ -93,27 +81,14 @@ class AuthRepository @Inject constructor(
         auth.signOut()
     }
 
-    /** Traduit les erreurs Firebase en messages compréhensibles, en français. */
+    /** Traduit les erreurs Firebase en messages compréhensibles, en français, pour l'utilisateur. */
     private fun mapAuthError(e: Exception): String = when {
-        e.message?.contains("badly formatted", true) == true ->
-            "L'adresse e-mail n'est pas valide."
-
-        e.message?.contains("email address is already in use", true) == true ->
-            "Cet e-mail est déjà utilisé."
-
-        e.message?.contains("password is invalid", true) == true ->
-            "Mot de passe incorrect."
-
-        e.message?.contains("no user record", true) == true ->
-            "Aucun compte associé à cet e-mail."
-
-        e.message?.contains("WEAK_PASSWORD", true) == true ->
-            "Le mot de passe doit contenir au moins 6 caractères."
-
-        e.message?.contains("network", true) == true ->
-            "Vérifiez votre connexion internet."
-
-        else ->
-            "Une erreur est survenue. Veuillez réessayer."
+        e.message?.contains("badly formatted", true) == true -> "L'adresse e-mail n'est pas valide."
+        e.message?.contains("email address is already in use", true) == true -> "Cet e-mail est déjà utilisé."
+        e.message?.contains("password is invalid", true) == true -> "Mot de passe incorrect."
+        e.message?.contains("no user record", true) == true -> "Aucun compte associé à cet e-mail."
+        e.message?.contains("WEAK_PASSWORD", true) == true -> "Le mot de passe doit contenir au moins 6 caractères."
+        e.message?.contains("network", true) == true -> "Vérifiez votre connexion internet."
+        else -> "Une erreur est survenue. Veuillez réessayer."
     }
 }

@@ -66,8 +66,9 @@ class ChatRepository @Inject constructor(
         )
         newDoc.set(conversation).await()
         AfrResult.Success(newDoc.id)
-    } catch (e: Exception) {
-        AfrResult.Error("Impossible de démarrer la conversation.", e)
+        } catch (e: Exception) {
+            AfrResult.Error("Impossible de démarrer la conversation.", e)
+        }
     }
 
     /** Charge une première page de messages (les plus récents en premier). */
@@ -209,6 +210,4 @@ class ChatRepository @Inject constructor(
     suspend fun setMuted(conversationId: String, uid: String, muted: Boolean) {
         conversationsRef().document(conversationId).update("isMuted.$uid", muted).await()
     }
-}
-
 }

@@ -7,10 +7,8 @@ import androidx.compose.runtime.getValue
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
-import androidx.navigation.NavType
-import androidx.navigation.navArgument
 import androidx.navigation.compose.composable
-import androidx.navigation.compose.navArgument
+import androidx.navigation.navArgument
 import androidx.navigation.compose.rememberNavController
 import com.afrchat.app.ui.admin.AdminDashboardScreen
 import com.afrchat.app.ui.admin.ReportsScreen

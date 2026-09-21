@@ -19,11 +19,12 @@ class UserRepository @Inject constructor(
 
     suspend fun getUser(uid: String): AfrResult<User> {
         return try {
-        val snap = usersRef().document(uid).get().await()
-        val user = snap.toObject(User::class.java)
-        if (user != null) AfrResult.Success(user) else AfrResult.Error("Utilisateur introuvable.")
-    } catch (e: Exception) {
-        AfrResult.Error("Impossible de charger le profil.", e)
+            val snap = usersRef().document(uid).get().await()
+            val user = snap.toObject(User::class.java)
+            if (user != null) AfrResult.Success(user) else AfrResult.Error("Utilisateur introuvable.")
+        } catch (e: Exception) {
+            AfrResult.Error("Impossible de charger le profil.", e)
+        }
     }
 
     fun observeUser(uid: String): Flow<User?> = callbackFlow {
@@ -35,10 +36,11 @@ class UserRepository @Inject constructor(
 
     suspend fun updateProfile(uid: String, updates: Map<String, Any?>): AfrResult<Unit> {
         return try {
-        usersRef().document(uid).update(updates).await()
-        AfrResult.Success(Unit)
-    } catch (e: Exception) {
-        AfrResult.Error("La mise à jour du profil a échoué.", e)
+            usersRef().document(uid).update(updates).await()
+            AfrResult.Success(Unit)
+        } catch (e: Exception) {
+            AfrResult.Error("La mise à jour du profil a échoué.", e)
+        }
     }
 
     suspend fun setOnlineStatus(uid: String, isOnline: Boolean) {
@@ -52,7 +54,8 @@ class UserRepository @Inject constructor(
         } catch (_: Exception) { /* best-effort, ne bloque jamais l'UI */ }
     }
 
-    suspend fun searchUsers(query: String, excludeUid: String): AfrResult<List<User>> = try {
+    suspend fun searchUsers(query: String, excludeUid: String): AfrResult<List<User>> {
+        return try {
         if (query.isBlank()) return AfrResult.Success(emptyList())
         val trimmed = query.trim()
         val lower = trimmed.lowercase()
@@ -77,8 +80,9 @@ class UserRepository @Inject constructor(
 
         val users = (byName + byPhone).distinctBy { it.uid }.filter { it.uid != excludeUid && !it.isBanned }
         AfrResult.Success(users)
-    } catch (e: Exception) {
-        AfrResult.Error("La recherche a échoué.", e)
+        } catch (e: Exception) {
+            AfrResult.Error("La recherche a échoué.", e)
+        }
     }
 
     suspend fun registerFcmToken(uid: String) {
@@ -93,8 +97,4 @@ class UserRepository @Inject constructor(
             usersRef().document(uid).update("fcmTokens", com.google.firebase.firestore.FieldValue.arrayRemove(token)).await()
         } catch (_: Exception) { }
     }
-}
-
-}
-
 }

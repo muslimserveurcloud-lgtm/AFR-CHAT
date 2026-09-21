@@ -19,7 +19,6 @@ WebRTC. Architecture MVVM / Repository, identité visuelle originale (voir `app/
 5. [Configurer les appels audio/vidéo (WebRTC + TURN)](#5-configurer-les-appels-audiovidéo-webrtc--turn)
 6. [Ouvrir et lancer le projet](#6-ouvrir-et-lancer-le-projet)
 7. [Générer l'APK](#7-générer-lapk)
-   - [Compiler via GitHub Actions](#7bis-compiler-via-github-actions-sans-android-studio)
 8. [Créer le premier administrateur](#8-créer-le-premier-administrateur)
 9. [Checklist de vérification manuelle](#9-checklist-de-vérification-manuelle)
 10. [Structure du projet](#10-structure-du-projet)
@@ -167,9 +166,8 @@ appels fonctionneront dans certains cas mais pas tous.
 ```bash
 ./gradlew assembleDebug
 ```
-L'APK se trouve dans `app/build/outputs/apk/debug/AFR-CHAT-debug.apk` (le nom de sortie est déjà
-configuré via `archivesName` dans `app/build.gradle.kts`). Installable directement
-(`adb install AFR-CHAT-debug.apk`) sans configuration de signature supplémentaire.
+L'APK se trouve dans `app/build/outputs/apk/debug/app-debug.apk`. Installable directement
+(`adb install app-debug.apk`) sans configuration de signature supplémentaire.
 
 **APK release (signé, pour distribution) :**
 1. Génère un keystore si tu n'en as pas :
@@ -187,44 +185,12 @@ configuré via `archivesName` dans `app/build.gradle.kts`). Installable directem
    ```bash
    ./gradlew assembleRelease
    ```
-   Résultat : `app/build/outputs/apk/release/AFR-CHAT-release.apk`.
+   Résultat : `app/build/outputs/apk/release/app-release.apk` (nommé `AFR-CHAT.apk` une fois
+   renommé/exporté — Gradle ne permet pas nativement de renommer l'artefact, ajoute
+   `archivesName.set("AFR-CHAT")` dans le bloc `android {}` de `app/build.gradle.kts` si tu veux
+   ce nom exact en sortie).
 4. (Optionnel, recommandé pour le Play Store) Génère plutôt un **App Bundle** :
-   `./gradlew bundleRelease` → `app/build/outputs/bundle/release/AFR-CHAT-release.aab`.
-
-## 7bis. Compiler via GitHub Actions (sans Android Studio)
-
-Un workflow prêt à l'emploi est fourni : `.github/workflows/build-apk.yml`. Il compile l'APK
-dans le cloud à chaque push et le met à disposition en téléchargement — utile si tu ne veux pas
-installer Android Studio localement.
-
-**Mise en place :**
-1. Pousse ce projet sur un dépôt GitHub.
-2. Encode ton `google-services.json` en base64 :
-   ```bash
-   base64 -w0 google-services.json
-   ```
-3. Dans le dépôt GitHub : **Settings → Secrets and variables → Actions → New repository secret**,
-   crée `GOOGLE_SERVICES_JSON` avec le résultat de la commande ci-dessus. (Sans ce secret, le
-   build échoue immédiatement — le plugin Firebase l'exige même en debug.)
-4. Va dans l'onglet **Actions** du dépôt → *Build AFR CHAT APK* → **Run workflow** (ou pousse
-   simplement un commit sur `main`).
-5. Une fois le workflow terminé (vert), ouvre le run → section **Artifacts** en bas de page →
-   télécharge `AFR-CHAT-debug` (contient l'APK, installable directement sur un téléphone après
-   avoir autorisé les sources inconnues).
-
-**Pour obtenir aussi un APK release signé** dans le même run, ajoute 4 secrets supplémentaires
-(le job les détecte automatiquement et build la release seulement s'ils sont tous présents) :
-- `AFRCHAT_KEYSTORE_BASE64` (ton fichier `.jks` encodé en base64, `base64 -w0 fichier.jks`)
-- `AFRCHAT_STORE_PASSWORD`, `AFRCHAT_KEY_ALIAS`, `AFRCHAT_KEY_PASSWORD`
-
-Sans internet je ne peux pas exécuter ce workflow moi-même ni vérifier qu'il tourne sans erreur
-sur GitHub — il est écrit selon les standards actuels des actions officielles
-(`actions/checkout`, `actions/setup-java`, `android-actions/setup-android`,
-`gradle/actions/setup-gradle`), mais un premier essai réel peut révéler un ajustement mineur
-(ex. version d'action à bumper). Si un run échoue, colle-moi le message d'erreur du log et je
-corrige le YAML.
-
-
+   `./gradlew bundleRelease` → `app/build/outputs/bundle/release/app-release.aab`.
 
 ## 8. Créer le premier administrateur
 
