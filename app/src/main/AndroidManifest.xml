@@ -19,14 +19,6 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
 
     <!-- Appels (WebRTC + service au premier plan) -->
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
-    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
-    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
-    <uses-permission android:name="android.permission.WAKE_LOCK" />
-    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
 
     <!-- Contacts (recherche d'utilisateurs par contact, facultatif) -->
     <uses-permission android:name="android.permission.READ_CONTACTS" />
@@ -69,9 +61,7 @@
             </intent-filter>
         </service>
 
-        <!-- Service au premier plan pour maintenir un appel WebRTC actif -->
         <service
-            android:name=".service.CallForegroundService"
             android:exported="false"
             android:foregroundServiceType="camera|microphone" />
 
