@@ -121,4 +121,24 @@ class GroupRepository @Inject constructor(
 
 }
 
+    }
+    
+    suspend fun updateGroupInfo(groupId: String, name: String?, description: String?, photoUrl: String?): AfrResult<Unit> {
+        return try {
+            val updates = mutableMapOf<String, Any>()
+            name?.let { updates["name"] = it }
+            description?.let { updates["description"] = it }
+            photoUrl?.let { updates["photoUrl"] = it }
+            if (updates.isNotEmpty()) {
+                groupsRef().document(groupId).update(updates).await()
+            }
+            AfrResult.Success(Unit)
+        } catch (e: Exception) {
+            AfrResult.Error("La mise à jour du groupe a échoué.", e)
+        }
+    }
+
+    suspend fun setOnlyAdminsCanPost(groupId: String, value: Boolean) {
+        groupsRef().document(groupId).update("onlyAdminsCanPost", value).await()
+    }
 }
