@@ -91,47 +91,42 @@ class GroupRepository @Inject constructor(
 
     suspend fun setAdmin(groupId: String, targetUid: String, requesterUid: String, isAdmin: Boolean): AfrResult<Unit> {
         return try {
-        val group = groupsRef().document(groupId).get().await().toObject(Group::class.java)
-            ?: return AfrResult.Error("Groupe introuvable.")
-        if (requesterUid != group.ownerUid) return AfrResult.Error("Seul le propriétaire peut gérer les administrateurs.")
+            val group = groupsRef().document(groupId).get().await().toObject(Group::class.java)
+                ?: return AfrResult.Error("Groupe introuvable.")
 
-        val update = if (isAdmin) FieldValue.arrayUnion(targetUid) else FieldValue.arrayRemove(targetUid)
-        groupsRef().document(groupId).update("adminUids", update).await()
-        AfrResult.Success(Unit)
-    } catch (e: Exception) {
-        AfrResult.Error("Action impossible.", e)
+            if (requesterUid != group.ownerUid) {
+                return AfrResult.Error("Seul le propriétaire peut gérer les administrateurs.")
+            }
+
+            val update = if (isAdmin) {
+                FieldValue.arrayUnion(targetUid)
+            } else {
+                FieldValue.arrayRemove(targetUid)
+            }
+
+            groupsRef().document(groupId).update("adminUids", update).await()
+            AfrResult.Success(Unit)
+        } catch (e: Exception) {
+            AfrResult.Error("Action impossible.", e)
+        }
     }
 
-    suspend fun updateGroupInfo(groupId: String, name: String?, description: String?, photoUrl: String?): AfrResult<Unit> {
-        return try {
-        val updates = mutableMapOf<String, Any>()
-        name?.let { updates["name"] = it }
-        description?.let { updates["description"] = it }
-        photoUrl?.let { updates["photoUrl"] = it }
-        if (updates.isNotEmpty()) groupsRef().document(groupId).update(updates).await()
-        AfrResult.Success(Unit)
-    } catch (e: Exception) {
-        AfrResult.Error("La mise à jour du groupe a échoué.", e)
-    }
-
-    suspend fun setOnlyAdminsCanPost(groupId: String, value: Boolean) {
-        groupsRef().document(groupId).update("onlyAdminsCanPost", value).await()
-    }
-}
-
-}
-
-    }
-    
-    suspend fun updateGroupInfo(groupId: String, name: String?, description: String?, photoUrl: String?): AfrResult<Unit> {
+    suspend fun updateGroupInfo(
+        groupId: String,
+        name: String?,
+        description: String?,
+        photoUrl: String?
+    ): AfrResult<Unit> {
         return try {
             val updates = mutableMapOf<String, Any>()
             name?.let { updates["name"] = it }
             description?.let { updates["description"] = it }
             photoUrl?.let { updates["photoUrl"] = it }
+
             if (updates.isNotEmpty()) {
                 groupsRef().document(groupId).update(updates).await()
             }
+
             AfrResult.Success(Unit)
         } catch (e: Exception) {
             AfrResult.Error("La mise à jour du groupe a échoué.", e)
