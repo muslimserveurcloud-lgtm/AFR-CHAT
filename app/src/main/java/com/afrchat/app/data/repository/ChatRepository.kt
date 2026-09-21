@@ -210,3 +210,5 @@ class ChatRepository @Inject constructor(
         conversationsRef().document(conversationId).update("isMuted.$uid", muted).await()
     }
 }
+
+}

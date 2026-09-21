@@ -118,3 +118,5 @@ class GroupRepository @Inject constructor(
         groupsRef().document(groupId).update("onlyAdminsCanPost", value).await()
     }
 }
+
+}
