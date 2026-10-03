@@ -20,8 +20,8 @@ data class AdminUiState(
 )
 
 /**
- * Toutes les actions mutent l'état via des Cloud Functions "callable" qui vérifient le
- * custom claim "admin" côté serveur (voir firebase/functions/index.js). Cet écran n'est
+ * Toutes les actions passent par des fonctions RPC Postgres qui vérifient que l'appelant est
+ * admin côté serveur (voir supabase/migrations). Cet écran n'est
  * accessible dans l'app que si user.isAdmin == true (ProfileScreen), mais la sécurité réelle
  * est imposée par le serveur, pas par ce simple contrôle d'affichage côté client.
  */

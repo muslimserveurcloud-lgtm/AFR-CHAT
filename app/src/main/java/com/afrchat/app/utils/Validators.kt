@@ -2,7 +2,7 @@ package com.afrchat.app.utils
 
 import android.util.Patterns
 
-/** Validation des champs de formulaire côté client (la validation côté serveur est faite par les Firestore Rules). */
+/** Validation des champs de formulaire côté client (la validation côté serveur est faite par les politiques RLS et contraintes Postgres de Supabase). */
 object Validators {
     fun isValidEmail(input: String): Boolean = Patterns.EMAIL_ADDRESS.matcher(input).matches()
 

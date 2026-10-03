@@ -1,5 +1,7 @@
 package com.afrchat.app.utils
 
+import com.afrchat.app.BuildConfig
+
 /**
  * Constantes globales AFR CHAT.
  * ⚠️ Les identifiants TURN ci-dessous sont des exemples et doivent être remplacés par les
@@ -14,10 +16,11 @@ object Constants {
         "stun:stun1.l.google.com:19302"
     )
 
-    // Serveur TURN — À CONFIGURER (coturn auto-hébergé, ou service comme Twilio NTS / Xirsys / Metered).
-    const val TURN_URL = "turn:TON_SERVEUR_TURN:3478"
-    const val TURN_USERNAME = "A_CONFIGURER"
-    const val TURN_CREDENTIAL = "A_CONFIGURER"
+    // Serveur TURN — injecté au build via les secrets GitHub AFRCHAT_TURN_URL / _USERNAME / _CREDENTIAL
+    // (voir app/build.gradle.kts). Sans secrets : valeurs "A_CONFIGURER" => STUN seul.
+    val TURN_URL: String = BuildConfig.TURN_URL
+    val TURN_USERNAME: String = BuildConfig.TURN_USERNAME
+    val TURN_CREDENTIAL: String = BuildConfig.TURN_CREDENTIAL
 
     const val MAX_IMAGE_SIZE_BYTES = 10L * 1024 * 1024
     const val MAX_VIDEO_SIZE_BYTES = 100L * 1024 * 1024

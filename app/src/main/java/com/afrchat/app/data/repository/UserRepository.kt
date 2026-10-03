@@ -1,100 +1,104 @@
 package com.afrchat.app.data.repository
 
 import com.afrchat.app.data.model.AfrResult
+import com.afrchat.app.data.model.PrivacySettings
 import com.afrchat.app.data.model.User
-import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.messaging.FirebaseMessaging
-import kotlinx.coroutines.channels.awaitClose
+import com.afrchat.app.data.remote.ProfileRow
+import com.afrchat.app.data.remote.RealtimeHub
+import com.afrchat.app.data.remote.TableSpec
+import com.afrchat.app.data.remote.jsonOf
+import io.github.jan.supabase.SupabaseClient
+import io.github.jan.supabase.postgrest.postgrest
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.tasks.await
 import javax.inject.Inject
 import javax.inject.Singleton
 
 @Singleton
 class UserRepository @Inject constructor(
-    private val firestore: FirebaseFirestore
+    private val client: SupabaseClient,
+    private val hub: RealtimeHub
 ) {
-    private fun usersRef() = firestore.collection("users")
+    private val profiles get() = client.postgrest.from("profiles")
 
-    suspend fun getUser(uid: String): AfrResult<User> {
-        return try {
-            val snap = usersRef().document(uid).get().await()
-            val user = snap.toObject(User::class.java)
-            if (user != null) AfrResult.Success(user) else AfrResult.Error("Utilisateur introuvable.")
-        } catch (e: Exception) {
-            AfrResult.Error("Impossible de charger le profil.", e)
-        }
+    private suspend fun fetchUser(uid: String): User? =
+        profiles.select { filter { eq("id", uid) } }.decodeList<ProfileRow>().firstOrNull()?.toModel()
+
+    suspend fun getUser(uid: String): AfrResult<User> = try {
+        val user = fetchUser(uid)
+        if (user != null) AfrResult.Success(user) else AfrResult.Error("Utilisateur introuvable.")
+    } catch (e: Exception) {
+        AfrResult.Error("Impossible de charger le profil.", e)
     }
 
-    fun observeUser(uid: String): Flow<User?> = callbackFlow {
-        val reg = usersRef().document(uid).addSnapshotListener { snap, _ ->
-            trySend(snap?.toObject(User::class.java))
-        }
-        awaitClose { reg.remove() }
+    fun observeUser(uid: String): Flow<User?> =
+        hub.observe("profile-$uid", TableSpec("profiles", "id", uid)) { fetchUser(uid) }
+
+    /** Clés acceptées (noms "métier" des modèles) -> colonnes Postgres. */
+    private val columnFor = mapOf(
+        "firstName" to "first_name",
+        "lastName" to "last_name",
+        "phone" to "phone",
+        "photoUrl" to "photo_url",
+        "statusMessage" to "status_message"
+    )
+
+    suspend fun updateProfile(uid: String, updates: Map<String, Any?>): AfrResult<Unit> = try {
+        val row = jsonOf(*updates.mapNotNull { (k, v) -> columnFor[k]?.let { it to v } }.toTypedArray())
+        if (row.isNotEmpty()) profiles.update(row) { filter { eq("id", uid) } }
+        AfrResult.Success(Unit)
+    } catch (e: Exception) {
+        AfrResult.Error("La mise à jour du profil a échoué.", e)
     }
 
-    suspend fun updateProfile(uid: String, updates: Map<String, Any?>): AfrResult<Unit> {
-        return try {
-            usersRef().document(uid).update(updates).await()
-            AfrResult.Success(Unit)
-        } catch (e: Exception) {
-            AfrResult.Error("La mise à jour du profil a échoué.", e)
-        }
+    suspend fun updatePrivacy(uid: String, privacy: PrivacySettings): AfrResult<Unit> = try {
+        val json = jsonOf(
+            "privacy" to jsonOf(
+                "showLastSeen" to privacy.showLastSeen,
+                "showOnlineStatus" to privacy.showOnlineStatus,
+                "showReadReceipts" to privacy.showReadReceipts,
+                "whoCanAddToGroups" to privacy.whoCanAddToGroups
+            )
+        )
+        profiles.update(json) { filter { eq("id", uid) } }
+        AfrResult.Success(Unit)
+    } catch (e: Exception) {
+        AfrResult.Error("La mise à jour des paramètres a échoué.", e)
     }
 
     suspend fun setOnlineStatus(uid: String, isOnline: Boolean) {
         try {
-            usersRef().document(uid).update(
-                mapOf(
-                    "isOnline" to isOnline,
-                    "lastSeen" to System.currentTimeMillis()
-                )
-            ).await()
+            profiles.update(jsonOf("is_online" to isOnline, "last_seen" to System.currentTimeMillis())) {
+                filter { eq("id", uid) }
+            }
         } catch (_: Exception) { /* best-effort, ne bloque jamais l'UI */ }
     }
 
-    suspend fun searchUsers(query: String, excludeUid: String): AfrResult<List<User>> {
-        return try {
+    suspend fun searchUsers(query: String, excludeUid: String): AfrResult<List<User>> = try {
         if (query.isBlank()) return AfrResult.Success(emptyList())
         val trimmed = query.trim()
         val lower = trimmed.lowercase()
 
-        // Firestore ne supporte pas les recherches "contains" natives : on recherche par préfixe
-        // sur un champ dénormalisé "firstNameLower" (maintenu automatiquement par la Cloud
-        // Function onUserWrite à chaque écriture d'un profil — voir firebase/functions/index.js).
-        val byName = usersRef()
-            .orderBy("firstNameLower")
-            .startAt(lower).endAt(lower + "\uf8ff")
-            .limit(20).get().await()
-            .toObjects(User::class.java)
+        // Recherche par préfixe sur prénom, nom (colonnes générées en minuscules, indexées)
+        val byFirst = profiles.select {
+            filter { like("first_name_lower", "$lower%"); neq("id", excludeUid); eq("is_banned", false) }
+            limit(20)
+        }.decodeList<ProfileRow>()
 
-        // Si la requête ressemble à un numéro de téléphone, recherche aussi par préfixe exact du champ "phone".
+        val byLast = profiles.select {
+            filter { like("last_name_lower", "$lower%"); neq("id", excludeUid); eq("is_banned", false) }
+            limit(20)
+        }.decodeList<ProfileRow>()
+
+        // Si la requête ressemble à un numéro, recherche aussi par préfixe du champ "phone".
         val byPhone = if (trimmed.all { it.isDigit() || it == '+' } && trimmed.length >= 3) {
-            usersRef()
-                .orderBy("phone")
-                .startAt(trimmed).endAt(trimmed + "\uf8ff")
-                .limit(20).get().await()
-                .toObjects(User::class.java)
+            profiles.select {
+                filter { like("phone", "$trimmed%"); neq("id", excludeUid); eq("is_banned", false) }
+                limit(20)
+            }.decodeList<ProfileRow>()
         } else emptyList()
 
-        val users = (byName + byPhone).distinctBy { it.uid }.filter { it.uid != excludeUid && !it.isBanned }
-        AfrResult.Success(users)
-        } catch (e: Exception) {
-            AfrResult.Error("La recherche a échoué.", e)
-        }
-    }
-
-    suspend fun registerFcmToken(uid: String) {
-        try {
-            val token = FirebaseMessaging.getInstance().token.await()
-            usersRef().document(uid).update("fcmTokens", com.google.firebase.firestore.FieldValue.arrayUnion(token)).await()
-        } catch (_: Exception) { }
-    }
-
-    suspend fun removeFcmToken(uid: String, token: String) {
-        try {
-            usersRef().document(uid).update("fcmTokens", com.google.firebase.firestore.FieldValue.arrayRemove(token)).await()
-        } catch (_: Exception) { }
+        AfrResult.Success((byFirst + byLast + byPhone).distinctBy { it.id }.map { it.toModel() })
+    } catch (e: Exception) {
+        AfrResult.Error("La recherche a échoué.", e)
     }
 }

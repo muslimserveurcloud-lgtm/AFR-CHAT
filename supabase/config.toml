@@ -1,0 +1,7 @@
+# Configuration minimale pour la CLI Supabase (db push depuis GitHub Actions).
+project_id = "afr-chat"
+
+[auth]
+# Pour une inscription immédiate sans e-mail de confirmation, désactive aussi
+# "Confirm email" dans Dashboard > Authentication > Providers > Email.
+enable_signup = true

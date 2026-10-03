@@ -1,6 +1,6 @@
 package com.afrchat.app.data.model
 
-/** Signalement pour modération. Collection "reports/{id}" — lu/traité uniquement par les admins (Cloud Functions). */
+/** Signalement pour modération. Table "reports" — lue/traitée uniquement par les admins (RPC Supabase). */
 data class Report(
     val id: String = "",
     val reporterUid: String = "",

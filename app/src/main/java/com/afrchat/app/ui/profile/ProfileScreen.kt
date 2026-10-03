@@ -55,7 +55,7 @@ fun ProfileScreen(
 
             Spacer(Modifier.height(16.dp))
             Text(user?.fullName.orEmpty(), style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-            Text(user?.email.orEmpty(), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(viewModel.myEmail, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(4.dp))
             Text(user?.statusMessage.orEmpty(), style = MaterialTheme.typography.bodyMedium)
 

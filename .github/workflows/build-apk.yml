@@ -1,17 +1,29 @@
 name: Build AFR CHAT APK
 
-# Se déclenche sur push (branche main), sur pull request, et manuellement
-# (onglet "Actions" -> "Build AFR CHAT APK" -> "Run workflow").
+# Déclenchements :
+#  - push sur main et pull request vers main
+#  - manuel : onglet "Actions" -> "Build AFR CHAT APK" -> "Run workflow"
+#  - tag "v*" (ex. v1.0.0) : en plus du build, publie une GitHub Release avec les APK
+#    téléchargeables directement (pratique depuis un téléphone / Termux, sans zip d'artifact)
 on:
   push:
     branches: [ main ]
+    tags: [ "v*" ]
   pull_request:
     branches: [ main ]
   workflow_dispatch:
 
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write   # nécessaire uniquement pour créer la Release sur un tag
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
 
     steps:
       - name: Récupérer le code
@@ -23,61 +35,62 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Installer le SDK Android
-        uses: android-actions/setup-android@v4
+      - name: Installer le SDK Android (licences acceptées)
+        uses: android-actions/setup-android@v3
         with:
-          packages: 'platform-tools'
+          packages: "platform-tools platforms;android-35 build-tools;34.0.0"
 
-      - name: Installer Android 35 et Build Tools 35
-        run: |
-          sdkmanager --install "platforms;android-35" "build-tools;35.0.0"
-          yes | sdkmanager --licenses
-
-      # --- Firebase ---------------------------------------------------------
-      # Le plugin "com.google.gms.google-services" exige la présence de
-      # app/google-services.json pour compiler, MÊME en debug.
-      # -> Crée un secret de dépôt nommé GOOGLE_SERVICES_JSON contenant le
-      #    CONTENU EN BASE64 de ton fichier google-services.json téléchargé
-      #    depuis la console Firebase.
-      #    (commande locale pour l'encoder : base64 -w0 google-services.json)
-      - name: Restaurer google-services.json depuis les secrets
+      # --- Supabase -----------------------------------------------------------
+      # Secrets requis (Settings > Secrets and variables > Actions) :
+      #   SUPABASE_URL      : https://xxxxxxxx.supabase.co   (Project Settings > API)
+      #   SUPABASE_ANON_KEY : clé "anon public"              (Project Settings > API)
+      # La clé anon est publique par conception (elle finit dans l'APK) : la sécurité repose
+      # sur la RLS Postgres, jamais sur le secret de cette clé. N'utilise JAMAIS la clé service_role.
+      # Sans ces secrets, le build COMPILE avec des valeurs factices mais l'APK ne pourra pas
+      # se connecter au serveur.
+      - name: Vérifier la configuration Supabase
+        id: sb
         env:
-          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
-          if [ -z "$GOOGLE_SERVICES_JSON" ]; then
-            echo "::error::Le secret GOOGLE_SERVICES_JSON est manquant. Ajoute-le dans Settings > Secrets and variables > Actions."
-            exit 1
+          if [ -n "$SUPABASE_URL" ] && [ -n "$SUPABASE_ANON_KEY" ]; then
+            echo "real=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning title=Supabase non configuré::Secrets SUPABASE_URL et/ou SUPABASE_ANON_KEY absents : l'APK compile mais ne pourra pas se connecter. Ajoute-les dans Settings > Secrets and variables > Actions."
+            echo "real=false" >> "$GITHUB_OUTPUT"
           fi
-          echo "$GOOGLE_SERVICES_JSON" | base64 -d > app/google-services.json
 
       # --- Gradle -------------------------------------------------------------
-      # gradle-wrapper.jar n'est volontairement pas versionné dans ce dépôt.
-      # setup-gradle installe directement le binaire Gradle (version alignée
-      # sur gradle/wrapper/gradle-wrapper.properties), donc pas besoin du jar.
-      - name: Installer Gradle
+      # gradle-wrapper.jar n'est pas versionné : on installe directement Gradle 8.7
+      # (même version que gradle/wrapper/gradle-wrapper.properties) et on l'appelle via "gradle".
+      - name: Installer Gradle 8.7 (avec cache)
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: wrapper
+          gradle-version: "8.7"
 
-      - name: Régénérer le wrapper (gradlew / gradle-wrapper.jar)
-        run: gradle wrapper --gradle-version 8.7
-
-      - name: Build debug (non signé)
-        run: ./gradlew assembleDebug --stacktrace
+      - name: Build debug
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          AFRCHAT_TURN_URL: ${{ secrets.AFRCHAT_TURN_URL }}
+          AFRCHAT_TURN_USERNAME: ${{ secrets.AFRCHAT_TURN_USERNAME }}
+          AFRCHAT_TURN_CREDENTIAL: ${{ secrets.AFRCHAT_TURN_CREDENTIAL }}
+        run: gradle assembleDebug --stacktrace
 
       # --- Release signée (optionnelle) ---------------------------------------
-      # Ne s'exécute que si les 4 secrets de signature sont tous présents.
-      # Pour les créer :
-      #   1. keytool -genkeypair -v -keystore afrchat.jks -keyalg RSA -keysize 2048 -validity 10000 -alias afrchat
-      #   2. base64 -w0 afrchat.jks   (colle le résultat dans le secret AFRCHAT_KEYSTORE_BASE64)
-      #   3. Ajoute AFRCHAT_STORE_PASSWORD, AFRCHAT_KEY_ALIAS, AFRCHAT_KEY_PASSWORD
-      - name: Vérifier si les secrets de signature release sont présents
+      # Seulement si les 4 secrets de signature existent :
+      #   AFRCHAT_KEYSTORE_BASE64 (base64 -w0 afrchat.jks), AFRCHAT_STORE_PASSWORD,
+      #   AFRCHAT_KEY_ALIAS, AFRCHAT_KEY_PASSWORD
+      - name: Vérifier les secrets de signature
         id: signing
+        env:
+          KS: ${{ secrets.AFRCHAT_KEYSTORE_BASE64 }}
+          SP: ${{ secrets.AFRCHAT_STORE_PASSWORD }}
+          KA: ${{ secrets.AFRCHAT_KEY_ALIAS }}
+          KP: ${{ secrets.AFRCHAT_KEY_PASSWORD }}
         run: |
-          if [ -n "${{ secrets.AFRCHAT_KEYSTORE_BASE64 }}" ] && \
-             [ -n "${{ secrets.AFRCHAT_STORE_PASSWORD }}" ] && \
-             [ -n "${{ secrets.AFRCHAT_KEY_ALIAS }}" ] && \
-             [ -n "${{ secrets.AFRCHAT_KEY_PASSWORD }}" ]; then
+          if [ -n "$KS" ] && [ -n "$SP" ] && [ -n "$KA" ] && [ -n "$KP" ]; then
             echo "has_signing=true" >> "$GITHUB_OUTPUT"
           else
             echo "has_signing=false" >> "$GITHUB_OUTPUT"
@@ -87,29 +100,52 @@ jobs:
         if: steps.signing.outputs.has_signing == 'true'
         env:
           KEYSTORE_BASE64: ${{ secrets.AFRCHAT_KEYSTORE_BASE64 }}
-        run: echo "$KEYSTORE_BASE64" | base64 -d > afrchat-release.jks
+        run: echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/afrchat-release.jks"
 
+      # continue-on-error : un souci R8/minification en release ne doit pas empêcher
+      # de récupérer l'APK debug.
       - name: Build release (signée)
+        id: release
         if: steps.signing.outputs.has_signing == 'true'
+        continue-on-error: true
         env:
-          AFRCHAT_STORE_FILE: ${{ github.workspace }}/afrchat-release.jks
+          AFRCHAT_STORE_FILE: ${{ runner.temp }}/afrchat-release.jks
           AFRCHAT_STORE_PASSWORD: ${{ secrets.AFRCHAT_STORE_PASSWORD }}
           AFRCHAT_KEY_ALIAS: ${{ secrets.AFRCHAT_KEY_ALIAS }}
           AFRCHAT_KEY_PASSWORD: ${{ secrets.AFRCHAT_KEY_PASSWORD }}
-        run: ./gradlew assembleRelease --stacktrace
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          AFRCHAT_TURN_URL: ${{ secrets.AFRCHAT_TURN_URL }}
+          AFRCHAT_TURN_USERNAME: ${{ secrets.AFRCHAT_TURN_USERNAME }}
+          AFRCHAT_TURN_CREDENTIAL: ${{ secrets.AFRCHAT_TURN_CREDENTIAL }}
+        run: gradle assembleRelease --stacktrace
+
+      - name: Signaler l'échec de la release
+        if: steps.release.outcome == 'failure'
+        run: echo "::warning title=Release::Le build release a échoué (voir le log de l'étape précédente). L'APK debug est quand même publié."
 
       # --- Récupération des APK -----------------------------------------------
       - name: Publier l'APK debug
         uses: actions/upload-artifact@v4
         with:
-          name: AFR-CHAT-debug
+          name: ${{ steps.sb.outputs.real == 'true' && 'AFR-CHAT-debug' || 'AFR-CHAT-debug-SANS-SUPABASE' }}
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
 
       - name: Publier l'APK release
-        if: steps.signing.outputs.has_signing == 'true'
+        if: steps.release.outcome == 'success'
         uses: actions/upload-artifact@v4
         with:
           name: AFR-CHAT-release
           path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
+
+      # --- GitHub Release (uniquement sur un tag v*) --------------------------
+      - name: Créer la GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            app/build/outputs/apk/debug/*.apk
+            app/build/outputs/apk/release/*.apk

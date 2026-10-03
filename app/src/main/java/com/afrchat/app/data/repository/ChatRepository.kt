@@ -3,197 +3,148 @@ package com.afrchat.app.data.repository
 import com.afrchat.app.data.model.AfrResult
 import com.afrchat.app.data.model.Conversation
 import com.afrchat.app.data.model.Message
-import com.google.firebase.firestore.DocumentSnapshot
-import com.google.firebase.firestore.FieldValue
-import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.Query
-import kotlinx.coroutines.channels.awaitClose
+import com.afrchat.app.data.remote.ConversationRow
+import com.afrchat.app.data.remote.MessageInsert
+import com.afrchat.app.data.remote.MessageRow
+import com.afrchat.app.data.remote.RealtimeHub
+import com.afrchat.app.data.remote.TableSpec
+import com.afrchat.app.data.remote.jsonOf
+import io.github.jan.supabase.SupabaseClient
+import io.github.jan.supabase.postgrest.postgrest
+import io.github.jan.supabase.postgrest.query.Columns
+import io.github.jan.supabase.postgrest.query.Order
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.tasks.await
 import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Cœur de la messagerie instantanée : conversations, messages en temps réel,
- * pagination de l'historique, accusés de réception, indicateur de frappe.
+ * Cœur de la messagerie : conversations, messages en temps réel (Supabase Realtime),
+ * pagination, accusés de lecture, indicateur de frappe.
+ * Les effets de bord d'un envoi (aperçu de conversation, compteurs non-lus) sont gérés par
+ * le trigger SQL on_message_insert ; les actions sensibles passent par des fonctions RPC.
  */
 @Singleton
 class ChatRepository @Inject constructor(
-    private val firestore: FirebaseFirestore
+    private val client: SupabaseClient,
+    private val hub: RealtimeHub
 ) {
-    private fun conversationsRef() = firestore.collection("conversations")
-    private fun messagesRef(conversationId: String) =
-        conversationsRef().document(conversationId).collection("messages")
+    private val db get() = client.postgrest
+    private val convoColumns = Columns.raw("*, conversation_members(*)")
 
-    /** Liste des conversations de l'utilisateur, triée par dernier message, en temps réel. */
-    fun observeConversations(uid: String): Flow<List<Conversation>> = callbackFlow {
-        val reg = conversationsRef()
-            .whereArrayContains("participantIds", uid)
-            .orderBy("lastMessageAt", Query.Direction.DESCENDING)
-            .addSnapshotListener { snap, _ ->
-                trySend(snap?.toObjects(Conversation::class.java).orEmpty())
+    private suspend fun fetchConversations(): List<Conversation> =
+        db.from("conversations").select(convoColumns) { order("last_message_at", Order.DESCENDING) }
+            .decodeList<ConversationRow>().map { it.toModel() }
+
+    private suspend fun fetchConversation(id: String): Conversation? =
+        db.from("conversations").select(convoColumns) { filter { eq("id", id) } }
+            .decodeList<ConversationRow>().firstOrNull()?.toModel()
+
+    private suspend fun fetchMessages(conversationId: String, limit: Long, before: Long? = null): List<Message> =
+        db.from("messages").select {
+            filter {
+                eq("conversation_id", conversationId)
+                if (before != null) lt("sent_at", before)
             }
-        awaitClose { reg.remove() }
-    }
+            order("sent_at", Order.DESCENDING)
+            limit(limit)
+        }.decodeList<MessageRow>().map { it.toModel() }
 
-    fun observeConversation(conversationId: String): Flow<Conversation?> = callbackFlow {
-        val reg = conversationsRef().document(conversationId).addSnapshotListener { snap, _ ->
-            trySend(snap?.toObject(Conversation::class.java))
+    suspend fun getConversation(id: String): Conversation? = fetchConversation(id)
+
+    /** Liste des conversations de l'utilisateur (la RLS ne renvoie que les siennes), en temps réel. */
+    fun observeConversations(uid: String): Flow<List<Conversation>> =
+        hub.observe("conversations-$uid", TableSpec("conversations"), TableSpec("conversation_members", "user_id", uid)) {
+            fetchConversations()
         }
-        awaitClose { reg.remove() }
+
+    fun observeConversation(conversationId: String): Flow<Conversation?> =
+        hub.observe(
+            "conversation-$conversationId",
+            TableSpec("conversations", "id", conversationId),
+            TableSpec("conversation_members", "conversation_id", conversationId)
+        ) { fetchConversation(conversationId) }
+
+    /** Crée ou récupère la conversation privée existante entre l'utilisateur courant et [uidB]. */
+    suspend fun getOrCreatePrivateConversation(uidA: String, uidB: String): AfrResult<String> = try {
+        val id = db.rpc("get_or_create_private_conversation", jsonOf("other_id" to uidB)).decodeAs<String>()
+        AfrResult.Success(id)
+    } catch (e: Exception) {
+        AfrResult.Error("Impossible de démarrer la conversation.", e)
     }
 
-    /** Crée ou récupère la conversation privée existante entre deux utilisateurs. */
-    suspend fun getOrCreatePrivateConversation(uidA: String, uidB: String): AfrResult<String> {
-        return try {
-        val existing = conversationsRef()
-            .whereEqualTo("type", "private")
-            .whereArrayContains("participantIds", uidA)
-            .get().await()
-            .toObjects(Conversation::class.java)
-            .firstOrNull { it.participantIds.toSet() == setOf(uidA, uidB) }
-
-        if (existing != null) return AfrResult.Success(existing.id)
-
-        val newDoc = conversationsRef().document()
-        val conversation = Conversation(
-            id = newDoc.id,
-            type = "private",
-            participantIds = listOf(uidA, uidB),
-            lastMessageAt = System.currentTimeMillis()
-        )
-        newDoc.set(conversation).await()
-        AfrResult.Success(newDoc.id)
-        } catch (e: Exception) {
-            AfrResult.Error("Impossible de démarrer la conversation.", e)
-        }
-    }
-
-    /** Charge une première page de messages (les plus récents en premier). */
-    suspend fun loadRecentMessages(conversationId: String, pageSize: Long = 30): AfrResult<Pair<List<Message>, DocumentSnapshot?>> = try {
-        val snap = messagesRef(conversationId).orderBy("sentAt", Query.Direction.DESCENDING).limit(pageSize).get().await()
-        AfrResult.Success(snap.toObjects(Message::class.java) to snap.documents.lastOrNull())
+    /** Charge une première page de messages (les plus récents d'abord). Curseur = sentAt du plus ancien. */
+    suspend fun loadRecentMessages(conversationId: String, pageSize: Long = 30): AfrResult<Pair<List<Message>, Long?>> = try {
+        val msgs = fetchMessages(conversationId, pageSize)
+        AfrResult.Success(msgs to msgs.lastOrNull()?.sentAt)
     } catch (e: Exception) {
         AfrResult.Error("Impossible de charger les messages.", e)
     }
 
-    /** Chargement progressif des messages plus anciens (scroll vers le haut). */
-    suspend fun loadOlderMessages(conversationId: String, startAfter: DocumentSnapshot, pageSize: Long = 30): AfrResult<Pair<List<Message>, DocumentSnapshot?>> = try {
-        val snap = messagesRef(conversationId).orderBy("sentAt", Query.Direction.DESCENDING)
-            .startAfter(startAfter).limit(pageSize).get().await()
-        AfrResult.Success(snap.toObjects(Message::class.java) to snap.documents.lastOrNull())
+    /** Chargement progressif des messages plus anciens que [beforeSentAt] (scroll vers le haut). */
+    suspend fun loadOlderMessages(conversationId: String, beforeSentAt: Long, pageSize: Long = 30): AfrResult<Pair<List<Message>, Long?>> = try {
+        val msgs = fetchMessages(conversationId, pageSize, before = beforeSentAt)
+        AfrResult.Success(msgs to msgs.lastOrNull()?.sentAt)
     } catch (e: Exception) {
         AfrResult.Error("Impossible de charger l'historique.", e)
     }
 
-    /** Écoute les nouveaux messages en direct (Firestore renvoie automatiquement l'écriture locale hors-ligne, puis la confirmation serveur). */
-    fun observeNewMessages(conversationId: String): Flow<List<Message>> = callbackFlow {
-        val reg = messagesRef(conversationId)
-            .orderBy("sentAt", Query.Direction.DESCENDING)
-            .limit(50)
-            .addSnapshotListener { snap, _ ->
-                trySend(snap?.toObjects(Message::class.java).orEmpty())
-            }
-        awaitClose { reg.remove() }
-    }
+    /** Les 50 derniers messages, rafraîchis en direct à chaque insertion / modification. */
+    fun observeNewMessages(conversationId: String): Flow<List<Message>> =
+        hub.observe("messages-$conversationId", TableSpec("messages", "conversation_id", conversationId)) {
+            fetchMessages(conversationId, 50)
+        }
 
     suspend fun sendTextMessage(conversationId: String, senderId: String, text: String, replyToMessageId: String? = null): AfrResult<Unit> =
-        sendMessage(conversationId, Message(
-            conversationId = conversationId,
-            senderId = senderId,
-            type = "text",
-            text = text,
-            replyToMessageId = replyToMessageId,
-            clientTempId = UUID.randomUUID().toString()
-        ), previewText = text, previewType = "text")
+        insertMessage(MessageInsert(
+            conversationId = conversationId, senderId = senderId, type = "text", text = text,
+            replyToMessageId = replyToMessageId, clientTempId = UUID.randomUUID().toString()
+        ))
 
     suspend fun sendMediaMessage(
         conversationId: String, senderId: String, type: String, mediaUrl: String,
         fileName: String = "", fileSizeBytes: Long = 0L, mediaDurationMs: Long = 0L
-    ): AfrResult<Unit> {
-        val preview = when (type) {
-            "image" -> "📷 Photo"
-            "video" -> "🎥 Vidéo"
-            "audio" -> "🎤 Message vocal"
-            else -> "📎 $fileName"
-        }
-        return sendMessage(conversationId, Message(
-            conversationId = conversationId,
-            senderId = senderId,
-            type = type,
-            mediaUrl = mediaUrl,
-            fileName = fileName,
-            fileSizeBytes = fileSizeBytes,
-            mediaDurationMs = mediaDurationMs,
-            clientTempId = UUID.randomUUID().toString()
-        ), previewText = preview, previewType = type)
-    }
+    ): AfrResult<Unit> = insertMessage(MessageInsert(
+        conversationId = conversationId, senderId = senderId, type = type, mediaUrl = mediaUrl,
+        fileName = fileName, fileSizeBytes = fileSizeBytes, mediaDurationMs = mediaDurationMs,
+        clientTempId = UUID.randomUUID().toString()
+    ))
 
     suspend fun sendContactCard(conversationId: String, senderId: String, sharedContactUid: String, displayName: String): AfrResult<Unit> =
-        sendMessage(conversationId, Message(
+        insertMessage(MessageInsert(
             conversationId = conversationId, senderId = senderId, type = "contact",
-            sharedContactUid = sharedContactUid, text = displayName,
-            clientTempId = UUID.randomUUID().toString()
-        ), previewText = "👤 Contact : $displayName", previewType = "contact")
+            text = displayName, sharedContactUid = sharedContactUid, clientTempId = UUID.randomUUID().toString()
+        ))
 
-    private suspend fun sendMessage(conversationId: String, message: Message, previewText: String, previewType: String): AfrResult<Unit> = try {
-        val doc = messagesRef(conversationId).document()
-        val finalMessage = message.copy(id = doc.id, sentAt = System.currentTimeMillis())
-        doc.set(finalMessage).await()
-
-        val convo = conversationsRef().document(conversationId).get().await().toObject(Conversation::class.java)
-        val unreadUpdates = mutableMapOf<String, Any>()
-        convo?.participantIds?.filter { it != message.senderId }?.forEach { uid ->
-            unreadUpdates["unreadCount.$uid"] = FieldValue.increment(1)
-        }
-
-        conversationsRef().document(conversationId).update(
-            mapOf(
-                "lastMessage" to previewText,
-                "lastMessageType" to previewType,
-                "lastMessageSenderId" to message.senderId,
-                "lastMessageAt" to finalMessage.sentAt
-            ) + unreadUpdates
-        ).await()
+    private suspend fun insertMessage(message: MessageInsert): AfrResult<Unit> = try {
+        db.from("messages").insert(message)
         AfrResult.Success(Unit)
     } catch (e: Exception) {
-        AfrResult.Error("L'envoi du message a échoué. Il sera renvoyé automatiquement à la reconnexion.", e)
+        AfrResult.Error("L'envoi du message a échoué. Vérifiez votre connexion et réessayez.", e)
     }
 
     suspend fun markMessagesAsRead(conversationId: String, uid: String) {
-        try {
-            conversationsRef().document(conversationId).update("unreadCount.$uid", 0).await()
-            val unread = messagesRef(conversationId)
-                .whereNotEqualTo("senderId", uid)
-                .whereEqualTo("status", "delivered")
-                .get().await()
-            val batch = firestore.batch()
-            unread.documents.forEach { batch.update(it.reference, "status", "read") }
-            batch.commit().await()
-        } catch (_: Exception) { }
+        try { db.rpc("mark_conversation_read", jsonOf("conv" to conversationId)) } catch (_: Exception) { }
     }
 
     suspend fun setTyping(conversationId: String, uid: String, isTyping: Boolean) {
         try {
-            val update = if (isTyping) FieldValue.arrayUnion(uid) else FieldValue.arrayRemove(uid)
-            conversationsRef().document(conversationId).update("typingUserIds", update).await()
+            db.from("conversation_members").update(jsonOf("is_typing" to isTyping)) {
+                filter { eq("conversation_id", conversationId); eq("user_id", uid) }
+            }
         } catch (_: Exception) { }
     }
 
     suspend fun deleteMessageForMe(conversationId: String, messageId: String, uid: String) {
-        messagesRef(conversationId).document(messageId).update("deletedFor", FieldValue.arrayUnion(uid)).await()
+        try { db.rpc("delete_message_for_me", jsonOf("msg" to messageId)) } catch (_: Exception) { }
     }
 
     suspend fun deleteMessageForEveryone(conversationId: String, messageId: String) {
-        messagesRef(conversationId).document(messageId).update(
-            mapOf("isDeletedForEveryone" to true, "text" to "", "mediaUrl" to "")
-        ).await()
+        try { db.rpc("delete_message_for_everyone", jsonOf("msg" to messageId)) } catch (_: Exception) { }
     }
 
     suspend fun addReaction(conversationId: String, messageId: String, uid: String, emoji: String) {
-        messagesRef(conversationId).document(messageId).update("reactions.$uid", emoji).await()
+        try { db.rpc("react_to_message", jsonOf("msg" to messageId, "emoji" to emoji)) } catch (_: Exception) { }
     }
 
     suspend fun forwardMessage(fromConversationId: String, toConversationId: String, message: Message, senderId: String): AfrResult<Unit> {
@@ -204,10 +155,25 @@ class ChatRepository @Inject constructor(
     }
 
     suspend fun setArchived(conversationId: String, uid: String, archived: Boolean) {
-        conversationsRef().document(conversationId).update("isArchived.$uid", archived).await()
+        db.from("conversation_members").update(jsonOf("is_archived" to archived)) {
+            filter { eq("conversation_id", conversationId); eq("user_id", uid) }
+        }
     }
 
     suspend fun setMuted(conversationId: String, uid: String, muted: Boolean) {
-        conversationsRef().document(conversationId).update("isMuted.$uid", muted).await()
+        db.from("conversation_members").update(jsonOf("is_muted" to muted)) {
+            filter { eq("conversation_id", conversationId); eq("user_id", uid) }
+        }
     }
+
+    /** Nouveaux messages reçus (insertions), pour les notifications locales. La RLS filtre déjà les conversations. */
+    fun observeIncomingMessageSignals(): Flow<Unit> = hub.changes("incoming-messages", TableSpec("messages"))
+
+    /** Derniers messages reçus par l'utilisateur (hors les siens), du plus récent au plus ancien. */
+    suspend fun latestIncomingMessages(uid: String, limit: Long = 5): List<Message> =
+        db.from("messages").select {
+            filter { neq("sender_id", uid) }
+            order("sent_at", Order.DESCENDING)
+            limit(limit)
+        }.decodeList<MessageRow>().map { it.toModel() }
 }

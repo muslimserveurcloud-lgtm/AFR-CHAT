@@ -1,180 +1,86 @@
 package com.afrchat.app.data.repository
 
 import com.afrchat.app.data.model.AfrResult
-import com.afrchat.app.data.model.Conversation
 import com.afrchat.app.data.model.Group
-import com.google.firebase.firestore.FieldValue
-import com.google.firebase.firestore.FirebaseFirestore
-import kotlinx.coroutines.channels.awaitClose
+import com.afrchat.app.data.remote.GroupRow
+import com.afrchat.app.data.remote.RealtimeHub
+import com.afrchat.app.data.remote.TableSpec
+import com.afrchat.app.data.remote.jsonOf
+import io.github.jan.supabase.SupabaseClient
+import io.github.jan.supabase.postgrest.postgrest
+import io.github.jan.supabase.postgrest.query.Columns
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.tasks.await
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/**
+ * Groupes. Toutes les écritures passent par des fonctions RPC (supabase/migrations) qui vérifient
+ * côté serveur les rôles (propriétaire / admin / membre) : le client ne peut pas les contourner.
+ */
 @Singleton
 class GroupRepository @Inject constructor(
-    private val firestore: FirebaseFirestore
+    private val client: SupabaseClient,
+    private val hub: RealtimeHub
 ) {
-    private fun groupsRef() = firestore.collection("groups")
-    private fun conversationsRef() = firestore.collection("conversations")
+    private val db get() = client.postgrest
 
-    suspend fun createGroup(
-        name: String,
-        ownerUid: String,
-        memberUids: List<String>,
-        photoUrl: String = ""
-    ): AfrResult<String> {
-        return try {
-            val groupDoc = groupsRef().document()
-            val allMembers = (memberUids + ownerUid).distinct()
-            val group = Group(
-                id = groupDoc.id,
-                name = name,
-                photoUrl = photoUrl,
-                ownerUid = ownerUid,
-                adminUids = listOf(ownerUid),
-                memberUids = allMembers
-            )
-            groupDoc.set(group).await()
-
-            val convoDoc = conversationsRef().document()
-            val conversation = Conversation(
-                id = convoDoc.id,
-                type = "group",
-                groupId = groupDoc.id,
-                participantIds = allMembers,
-                lastMessage = "Groupe créé",
-                lastMessageAt = System.currentTimeMillis()
-            )
-            convoDoc.set(conversation).await()
-            groupsRef().document(groupDoc.id).update("conversationId", convoDoc.id).await()
-
-            AfrResult.Success(convoDoc.id)
-        } catch (e: Exception) {
-            AfrResult.Error("La création du groupe a échoué.", e)
-        }
+    /** Crée le groupe et sa conversation ; renvoie l'id de la conversation. */
+    suspend fun createGroup(name: String, ownerUid: String, memberUids: List<String>, photoUrl: String = ""): AfrResult<String> = try {
+        val conversationId = db.rpc(
+            "create_group",
+            jsonOf("p_name" to name, "p_member_ids" to memberUids.filter { it != ownerUid }, "p_photo_url" to photoUrl)
+        ).decodeAs<String>()
+        AfrResult.Success(conversationId)
+    } catch (e: Exception) {
+        AfrResult.Error("La création du groupe a échoué.", e)
     }
 
-    fun observeGroup(groupId: String): Flow<Group?> = callbackFlow {
-        val reg = groupsRef().document(groupId).addSnapshotListener { snap, _ ->
-            trySend(snap?.toObject(Group::class.java))
-        }
-        awaitClose { reg.remove() }
+    private suspend fun fetchGroup(groupId: String): Group? =
+        db.from("groups").select(Columns.raw("*, group_members(*)")) { filter { eq("id", groupId) } }
+            .decodeList<GroupRow>().firstOrNull()?.toModel()
+
+    fun observeGroup(groupId: String): Flow<Group?> =
+        hub.observe(
+            "group-$groupId",
+            TableSpec("groups", "id", groupId),
+            TableSpec("group_members", "group_id", groupId)
+        ) { fetchGroup(groupId) }
+
+    suspend fun addMembers(groupId: String, conversationId: String, uids: List<String>): AfrResult<Unit> = try {
+        db.rpc("add_group_members", jsonOf("g" to groupId, "uids" to uids))
+        AfrResult.Success(Unit)
+    } catch (e: Exception) {
+        AfrResult.Error("Impossible d'ajouter ces membres.", e)
     }
 
-    suspend fun addMembers(
-        groupId: String,
-        conversationId: String,
-        uids: List<String>
-    ): AfrResult<Unit> {
-        return try {
-            if (uids.isEmpty()) {
-                return AfrResult.Success(Unit)
-            }
-            groupsRef().document(groupId)
-                .update("memberUids", FieldValue.arrayUnion(*uids.toTypedArray()))
-                .await()
-            conversationsRef().document(conversationId)
-                .update("participantIds", FieldValue.arrayUnion(*uids.toTypedArray()))
-                .await()
-            AfrResult.Success(Unit)
-        } catch (e: Exception) {
-            AfrResult.Error("Impossible d'ajouter ces membres.", e)
-        }
+    suspend fun removeMember(groupId: String, conversationId: String, uid: String, requesterUid: String): AfrResult<Unit> = try {
+        db.rpc("remove_group_member", jsonOf("g" to groupId, "uid" to uid))
+        AfrResult.Success(Unit)
+    } catch (e: Exception) {
+        AfrResult.Error("Seuls les administrateurs peuvent retirer un membre.", e)
     }
 
-    suspend fun removeMember(
-        groupId: String,
-        conversationId: String,
-        uid: String,
-        requesterUid: String
-    ): AfrResult<Unit> {
-        return try {
-            val group = groupsRef().document(groupId).get().await().toObject(Group::class.java)
-                ?: return AfrResult.Error("Groupe introuvable.")
+    suspend fun leaveGroup(groupId: String, conversationId: String, uid: String) =
+        removeMember(groupId, conversationId, uid, requesterUid = uid)
 
-            if (requesterUid !in group.adminUids && requesterUid != uid) {
-                return AfrResult.Error("Seuls les administrateurs peuvent retirer un membre.")
-            }
-
-            groupsRef().document(groupId).update(
-                mapOf(
-                    "memberUids" to FieldValue.arrayRemove(uid),
-                    "adminUids" to FieldValue.arrayRemove(uid)
-                )
-            ).await()
-
-            conversationsRef().document(conversationId)
-                .update("participantIds", FieldValue.arrayRemove(uid))
-                .await()
-
-            AfrResult.Success(Unit)
-        } catch (e: Exception) {
-            AfrResult.Error("Impossible de retirer ce membre.", e)
-        }
+    suspend fun setAdmin(groupId: String, targetUid: String, requesterUid: String, isAdmin: Boolean): AfrResult<Unit> = try {
+        db.rpc("set_group_admin", jsonOf("g" to groupId, "uid" to targetUid, "make_admin" to isAdmin))
+        AfrResult.Success(Unit)
+    } catch (e: Exception) {
+        AfrResult.Error("Seul le propriétaire peut gérer les administrateurs.", e)
     }
 
-    suspend fun leaveGroup(
-        groupId: String,
-        conversationId: String,
-        uid: String
-    ): AfrResult<Unit> {
-        return removeMember(groupId, conversationId, uid, requesterUid = uid)
-    }
-
-    suspend fun setAdmin(
-        groupId: String,
-        targetUid: String,
-        requesterUid: String,
-        isAdmin: Boolean
-    ): AfrResult<Unit> {
-        return try {
-            val group = groupsRef().document(groupId).get().await().toObject(Group::class.java)
-                ?: return AfrResult.Error("Groupe introuvable.")
-
-            if (requesterUid != group.ownerUid) {
-                return AfrResult.Error("Seul le propriétaire peut gérer les administrateurs.")
-            }
-
-            val update = if (isAdmin) {
-                FieldValue.arrayUnion(targetUid)
-            } else {
-                FieldValue.arrayRemove(targetUid)
-            }
-
-            groupsRef().document(groupId).update("adminUids", update).await()
-            AfrResult.Success(Unit)
-        } catch (e: Exception) {
-            AfrResult.Error("Action impossible.", e)
-        }
-    }
-
-    suspend fun updateGroupInfo(
-        groupId: String,
-        name: String?,
-        description: String?,
-        photoUrl: String?
-    ): AfrResult<Unit> {
-        return try {
-            val updates = mutableMapOf<String, Any>()
-            name?.let { updates["name"] = it }
-            description?.let { updates["description"] = it }
-            photoUrl?.let { updates["photoUrl"] = it }
-
-            if (updates.isNotEmpty()) {
-                groupsRef().document(groupId).update(updates).await()
-            }
-
-            AfrResult.Success(Unit)
-        } catch (e: Exception) {
-            AfrResult.Error("La mise à jour du groupe a échoué.", e)
-        }
+    suspend fun updateGroupInfo(groupId: String, name: String?, description: String?, photoUrl: String?): AfrResult<Unit> = try {
+        db.rpc(
+            "update_group_info",
+            jsonOf("g" to groupId, "p_name" to name, "p_description" to description, "p_photo_url" to photoUrl)
+        )
+        AfrResult.Success(Unit)
+    } catch (e: Exception) {
+        AfrResult.Error("La mise à jour du groupe a échoué.", e)
     }
 
     suspend fun setOnlyAdminsCanPost(groupId: String, value: Boolean) {
-        groupsRef().document(groupId)
-            .update("onlyAdminsCanPost", value)
-            .await()
+        db.rpc("set_only_admins_can_post", jsonOf("g" to groupId, "v" to value))
     }
 }

@@ -1,6 +1,6 @@
 package com.afrchat.app.data.model
 
-/** Groupe de discussion. Collection "groups/{id}". */
+/** Groupe de discussion. Tables "groups" + "group_members". */
 data class Group(
     val id: String = "",
     val name: String = "",

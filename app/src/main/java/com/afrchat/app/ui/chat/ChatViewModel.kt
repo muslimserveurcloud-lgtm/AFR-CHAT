@@ -10,6 +10,7 @@ import com.afrchat.app.data.model.Message
 import com.afrchat.app.data.repository.AuthRepository
 import com.afrchat.app.data.repository.ChatRepository
 import com.afrchat.app.data.repository.MediaRepository
+import com.afrchat.app.service.ActiveChat
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -47,6 +48,7 @@ class ChatViewModel @Inject constructor(
     private var typingJob: kotlinx.coroutines.Job? = null
 
     init {
+        ActiveChat.conversationId = conversationId
         observeMessages()
         observeConversationMeta()
         markRead()
@@ -131,8 +133,13 @@ class ChatViewModel @Inject constructor(
     fun react(messageId: String, emoji: String) = viewModelScope.launch { chatRepository.addReaction(conversationId, messageId, currentUid, emoji) }
 
     fun loadOlder(onDone: (Boolean) -> Unit) {
-        // Pagination gérée via ChatRepository.loadOlderMessages ; branché à un DocumentSnapshot
-        // curseur conservé côté UI (LazyColumn) lors du scroll vers le haut.
+        // Pagination via ChatRepository.loadOlderMessages(conversationId, beforeSentAt) ;
+        // le curseur est le sentAt du plus ancien message affiché.
         onDone(true)
+    }
+
+    override fun onCleared() {
+        if (ActiveChat.conversationId == conversationId) ActiveChat.conversationId = null
+        super.onCleared()
     }
 }

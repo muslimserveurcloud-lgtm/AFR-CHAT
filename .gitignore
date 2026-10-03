@@ -9,14 +9,15 @@
 .cxx
 local.properties
 
-# Firebase — NE JAMAIS committer ces fichiers
-app/google-services.json
-firebase/scripts/serviceAccountKey.json
+# Supabase — ne jamais committer de clés/mots de passe (utilise les secrets GitHub)
+supabase/.temp/
+supabase/.branches/
+.env
+*.jks
+*.keystore
 
 # Signature release — NE JAMAIS committer
 *.jks
 *.keystore
 
 # Node (Cloud Functions)
-firebase/functions/node_modules/
-firebase-debug.log

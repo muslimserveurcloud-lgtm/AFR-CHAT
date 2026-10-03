@@ -1,131 +1,60 @@
 # AFR CHAT
 
-Application Android native de messagerie instantanée — Kotlin + Jetpack Compose + Firebase +
+Application Android native de messagerie instantanée — Kotlin + Jetpack Compose + **Supabase** +
 WebRTC. Architecture MVVM / Repository, identité visuelle originale (voir `app/src/main/res`).
 
-> ⚠️ **À lire avant tout** : ce projet a été généré dans un environnement sans accès réseau
-> (pas de téléchargement possible du SDK Android, de Gradle, ni des dépendances). **Le code
-> n'a donc pas pu être compilé ni exécuté ici**, et aucun APK n'a été généré automatiquement.
-> Tout le code est réel et complet (aucun pseudo-code, aucune fonction laissée en "à faire"),
-> mais tu dois toi-même l'ouvrir dans Android Studio pour compiler, corriger d'éventuelles
-> erreurs mineures liées à l'environnement (versions de SDK installées, etc.) et générer l'APK.
-> La section [7. Générer l'APK](#7-générer-lapk) t'explique comment faire, en 10-15 minutes.
+> ⚠️ **À lire avant tout** : ce projet a été migré de Firebase vers Supabase dans un environnement
+> sans accès réseau. **Le code n'a pas pu être compilé ni exécuté.** La migration utilise
+> `supabase-kt 2.6.1` ; si Gradle signale une erreur d'API ou de version, colle le message du log
+> pour qu'on la corrige. Aucun APK n'a été généré automatiquement.
 
 ## Sommaire
-1. [Ce qui est implémenté](#1-ce-qui-est-implémenté)
-2. [Limitations connues](#2-limitations-connues)
-3. [Prérequis](#3-prérequis)
-4. [Configurer Firebase](#4-configurer-firebase)
-5. [Configurer les appels audio/vidéo (WebRTC + TURN)](#5-configurer-les-appels-audiovidéo-webrtc--turn)
-6. [Ouvrir et lancer le projet](#6-ouvrir-et-lancer-le-projet)
-7. [Générer l'APK](#7-générer-lapk)
-8. [Créer le premier administrateur](#8-créer-le-premier-administrateur)
-9. [Checklist de vérification manuelle](#9-checklist-de-vérification-manuelle)
-10. [Structure du projet](#10-structure-du-projet)
+1. Fonctionnalités · 2. Limitations · 3. Configurer Supabase · 4. Appels (TURN) ·
+5. Lancer le projet · 6. GitHub Actions · 7. Premier administrateur · 8. Structure
 
----
+## 1. Fonctionnalités
 
-## 1. Ce qui est implémenté
+- **Comptes** : inscription, connexion, déconnexion, mot de passe oublié (Supabase Auth, session persistée).
+- **Profil** : photo, nom, statut, confidentialité (dernière connexion, statut en ligne, accusés de lecture).
+- **Messagerie temps réel** : texte, réponses, transfert, suppression (pour moi / pour tous), réactions,
+  statuts envoyé/lu, « en train d'écrire… », pagination de l'historique (Supabase Realtime).
+- **Médias** : photos, vidéos, fichiers, messages vocaux, upload avec progression (Supabase Storage).
+- **Groupes** : création, membres, rôles, « seuls les admins peuvent publier », quitter.
+- **Statuts** : texte, photo, vidéo, expiration à 24 h (purge horaire par pg_cron).
+- **Appels audio/vidéo** : WebRTC, signalisation via Supabase.
+- **Administration** : statistiques, signalements, bannissement — via des fonctions RPC Postgres qui
+  vérifient le rôle admin côté serveur.
+- **Sécurité** : Row Level Security sur toutes les tables, privilèges de colonnes (un utilisateur ne peut
+  pas s'auto-promouvoir admin), politiques Storage par dossier.
 
-Code Kotlin complet (pas d'extraits, pas de stubs) pour :
+## 2. Limitations
 
-- **Comptes** : inscription (prénom, nom, e-mail, mot de passe, validations), connexion,
-  déconnexion, mot de passe oublié, maintien de session (natif Firebase Auth).
-- **Profil** : photo, nom, statut, paramètres de confidentialité (dernière connexion, statut en
-  ligne, accusés de lecture).
-- **Messagerie privée temps réel** : texte, réponses, transfert, suppression (pour moi / pour
-  tous), réactions emoji, statuts envoyé/distribué/lu, indicateur "en train d'écrire…", scroll +
-  pagination de l'historique.
-- **Médias** : photos, vidéos, fichiers, messages vocaux (enregistrement natif MediaRecorder),
-  upload avec barre de progression vers Firebase Storage.
-- **Groupes** : création, ajout/retrait de membres, rôles admin/membre, permissions
-  ("seuls les admins peuvent publier"), quitter le groupe.
-- **Statuts/Stories** : texte, photo, vidéo, expiration automatique à 24h (Cloud Function
-  planifiée qui nettoie aussi les fichiers Storage associés).
-- **Notifications push** (FCM) : nouveaux messages et appels entrants, contenu du message jamais
-  exposé sur l'écran verrouillé.
-- **Recherche** : utilisateurs (par prénom/nom), avec navigation directe vers la conversation.
-- **Appels audio/vidéo** : implémentation WebRTC réelle (négociation SDP, échange ICE via
-  Firestore, flux média pair-à-pair, coupe micro/caméra, changement de caméra) — voir limitations
-  ci-dessous concernant l'infrastructure TURN à fournir.
-- **Mode hors-ligne** : persistance locale Firestore, écritures rejouées automatiquement à la
-  reconnexion, WorkManager pour la resynchronisation du statut/jeton FCM.
-- **Espace administrateur** : tableau de bord (statistiques, dont un compteur réel de messages
-  sur 30 jours via un compteur journalier incrémental), gestion des signalements,
-  bannissement/débannissement — toute la logique sensible est côté serveur (Cloud Functions +
-  custom claims), jamais côté client.
-- **Sécurité** : règles Firestore/Storage complètes (`firebase/firestore.rules`,
-  `firebase/storage.rules`), App Check (Play Integrity), validation des champs côté client.
-- **Mode clair/sombre**, identité visuelle originale (nom, logo, palette — voir ci-dessous).
+- **Notifications : uniquement app ouverte ou en arrière-plan récent.** Supabase n'a pas de service
+  de push. Les notifications locales (`service/MessageNotifier.kt`) sont alimentées par Realtime.
+  Pour être notifié app fermée, il faut ajouter un push externe (FCM, UnifiedPush, ntfy…) déclenché
+  par un Database Webhook / Edge Function. Les appels entrants ne sonnent donc aussi que app ouverte.
+- **Pas de file d'écriture hors-ligne** (Firestore en avait une) : un message envoyé sans réseau
+  échoue et l'utilisateur doit réessayer.
+- **Pas de chiffrement de bout en bout** (TLS en transit, chiffrement au repos par Supabase).
+- **Appels** : un serveur TURN est nécessaire pour être fiable (section 4).
+- **Médias** : bucket public `media` (URL non devinables, UUID). Plan gratuit : 50 Mo max par fichier.
+- **Connexion par e-mail** uniquement (le téléphone n'est qu'un champ de profil recherchable).
+- Les fichiers médias des statuts expirés restent dans le bucket (seules les lignes sont purgées).
+- Compilation non vérifiée (voir avertissement en haut).
 
-## 2. Limitations connues
+## 3. Configurer Supabase
 
-Sois transparent avec toi-même sur ces points avant de considérer le projet "terminé" :
-
-- **Compilation non vérifiée ici.** Le code suit scrupuleusement les API Kotlin/Compose/Firebase/
-  WebRTC actuelles, mais n'ayant pas pu exécuter Gradle, il est possible qu'Android Studio
-  signale une ou deux erreurs mineures (import manquant, léger désaccord de version entre
-  bibliothèques) à corriger — l'auto-complétion et le "Quick Fix" d'Android Studio suffiront dans
-  l'immense majorité des cas.
-- **Chiffrement de bout en bout : non implémenté.** Les données sont chiffrées en transit (TLS)
-  et au repos (Firebase), mais pas chiffrées de bout en bout. Ne communique jamais que l'app
-  offre un chiffrement de bout en bout tant que ce n'est pas explicitement ajouté (bibliothèque
-  éprouvée comme libsignal-client, effort de développement significatif à part entière).
-- **Appels WebRTC : nécessitent un serveur TURN pour être fiables en conditions réelles**
-  (réseaux mobiles/Wi-Fi grand public avec NAT/pare-feu). Sans TURN configuré, les appels ne
-  fonctionneront que dans certaines conditions réseau favorables. Voir section 5.
-- **Recherche par numéro de téléphone** : implémentée (recherche par préfixe sur le champ
-  `phone`, en plus du nom). Le champ téléphone est facultatif à l'inscription, conformément à
-  la demande "numéro de téléphone OU adresse e-mail" — l'e-mail reste l'identifiant de connexion
-  Firebase Auth dans cette version ; ajouter la connexion par téléphone nécessiterait d'activer
-  la méthode "Téléphone" dans Firebase Authentication (vérification SMS) en plus de l'e-mail.
-- **Lecture vidéo dans les bulles de chat et les statuts** : lecteur ExoPlayer/Media3 intégré
-  (`ui/components/VideoPlayerView.kt`), branché dans les bulles de message et le visualiseur de
-  statuts.
-- Aucun APK n'a été généré automatiquement (voir avertissement en haut de ce fichier).
-- **`gradlew` / `gradlew.bat` sont inclus**, mais le binaire `gradle/wrapper/gradle-wrapper.jar`
-  ne l'est pas (fichier binaire, impossible à générer sans accès réseau ici). Android Studio le
-  télécharge automatiquement à l'ouverture du projet ; en ligne de commande sans Android Studio,
-  lance d'abord `gradle wrapper --gradle-version 8.7` avec une installation locale de Gradle.
-
-## 3. Prérequis
-
-- [Android Studio](https://developer.android.com/studio) (Koala ou plus récent recommandé)
-- JDK 17 (fourni avec Android Studio)
-- Un compte Google + un projet [Firebase](https://console.firebase.google.com)
-- Un appareil Android (API 24+) ou un émulateur avec Google Play Services
-
-## 4. Configurer Firebase
-
-1. Crée un projet sur [console.firebase.google.com](https://console.firebase.google.com).
-2. Ajoute une application Android avec le nom de package **`com.afrchat.app`**.
-3. Télécharge le fichier **`google-services.json`** généré et place-le dans
-   `app/google-services.json` (remplace le gabarit `app/google-services.json.example`, qui n'est
-   qu'un exemple de structure).
-4. Dans la console Firebase, active :
-   - **Authentication** → méthode de connexion **E-mail/Mot de passe**.
-   - **Firestore Database** → crée la base (mode production).
-   - **Storage** → crée le bucket par défaut.
-   - **Cloud Messaging** → rien à faire manuellement, fonctionne dès que `google-services.json`
-     est en place.
-   - **App Check** → enregistre l'app avec le fournisseur **Play Integrity**.
-5. Déploie les règles de sécurité et les Cloud Functions (nécessite le
-   [Firebase CLI](https://firebase.google.com/docs/cli) : `npm install -g firebase-tools`) :
-   ```bash
-   cd firebase
-   firebase login
-   firebase use --add          # sélectionne ton projet, ou édite .firebaserc directement
-   firebase deploy --only firestore:rules,firestore:indexes,storage:rules
-   cd functions && npm install && cd ..
-   firebase deploy --only functions
-   ```
-6. Le plan **Blaze** (paiement à l'usage) est requis pour déployer des Cloud Functions et pour
-   les appels sortants réseau depuis les fonctions (envoi de notifications). Le plan Blaze inclut
-   un quota gratuit généreux, largement suffisant pour le développement/test.
+1. Crée un projet sur [supabase.com](https://supabase.com). Note le **mot de passe de la base**.
+2. **Project Settings → API** : copie l'**URL** et la clé **anon public** (jamais la `service_role`).
+3. **Authentication → Providers → Email** : pour tester sans mail de confirmation, désactive
+   *Confirm email*. (Sinon, l'utilisateur doit cliquer le lien reçu avant de se connecter.)
+4. Applique le schéma : soit via GitHub Actions (section 6, workflow *Déployer la base Supabase*),
+   soit en collant `supabase/migrations/20261002000000_afrchat_schema.sql` dans **SQL Editor → Run**.
+5. **Database → Extensions** : active `pg_cron` si tu veux la purge automatique des statuts expirés.
 
 ## 5. Configurer les appels audio/vidéo (WebRTC + TURN)
 
-Les appels utilisent Firestore comme canal de signalisation (aucun serveur à héberger pour ça),
+Les appels utilisent Supabase (Postgres + Realtime) comme canal de signalisation (aucun serveur à héberger pour ça),
 mais un **serveur TURN** est nécessaire pour que l'appel s'établisse de façon fiable entre deux
 réseaux différents (ex. un appelant en 4G et un appelé derrière une box Wi-Fi/NAT).
 
@@ -156,8 +85,8 @@ appels fonctionneront dans certains cas mais pas tous.
    Gradle installé une première fois, ou passe par Android Studio qui l'intègre déjà).
 3. Laisse Android Studio synchroniser le projet (télécharge les dépendances — nécessite une
    connexion internet, contrairement à l'environnement où ce projet a été généré).
-4. Vérifie que `app/google-services.json` est bien présent (étape 4.3).
-5. Sélectionne un appareil/émulateur (API 24 minimum, Google Play Services requis pour FCM/appels)
+4. Renseigne `SUPABASE_URL` et `SUPABASE_ANON_KEY` dans `~/.gradle/gradle.properties` (ou en variables d'environnement).
+5. Sélectionne un appareil/émulateur (API 24 minimum, pour les appels)
    et clique sur **Run ▶**.
 
 ## 7. Générer l'APK
@@ -166,8 +95,9 @@ appels fonctionneront dans certains cas mais pas tous.
 ```bash
 ./gradlew assembleDebug
 ```
-L'APK se trouve dans `app/build/outputs/apk/debug/app-debug.apk`. Installable directement
-(`adb install app-debug.apk`) sans configuration de signature supplémentaire.
+L'APK se trouve dans `app/build/outputs/apk/debug/AFR-CHAT-debug.apk` (le nom de sortie est déjà
+configuré via `archivesName` dans `app/build.gradle.kts`). Installable directement
+(`adb install AFR-CHAT-debug.apk`) sans configuration de signature supplémentaire.
 
 **APK release (signé, pour distribution) :**
 1. Génère un keystore si tu n'en as pas :
@@ -185,75 +115,58 @@ L'APK se trouve dans `app/build/outputs/apk/debug/app-debug.apk`. Installable di
    ```bash
    ./gradlew assembleRelease
    ```
-   Résultat : `app/build/outputs/apk/release/app-release.apk` (nommé `AFR-CHAT.apk` une fois
-   renommé/exporté — Gradle ne permet pas nativement de renommer l'artefact, ajoute
-   `archivesName.set("AFR-CHAT")` dans le bloc `android {}` de `app/build.gradle.kts` si tu veux
-   ce nom exact en sortie).
+   Résultat : `app/build/outputs/apk/release/AFR-CHAT-release.apk`.
 4. (Optionnel, recommandé pour le Play Store) Génère plutôt un **App Bundle** :
-   `./gradlew bundleRelease` → `app/build/outputs/bundle/release/app-release.aab`.
+   `./gradlew bundleRelease` → `app/build/outputs/bundle/release/AFR-CHAT-release.aab`.
 
-## 8. Créer le premier administrateur
+## 6. GitHub Actions (compilation APK + déploiement base)
 
-Aucun compte n'a le rôle admin au départ (et pour cause : la fonction qui attribue ce rôle
-nécessite déjà d'être admin). Utilise le script fourni **une seule fois** :
+Deux workflows dans `.github/workflows/` :
 
-```bash
-cd firebase/scripts
-# place ta clé de compte de service ici sous le nom serviceAccountKey.json
-# (Console Firebase → Paramètres du projet → Comptes de service → Générer une nouvelle clé privée)
-npm install firebase-admin
-node bootstrap-admin.js <UID_DE_TON_COMPTE>
+- **`build-apk.yml`** — compile l'APK à chaque push sur `main`, en manuel, ou sur un tag `v*`.
+- **`supabase-deploy.yml`** — applique `supabase/migrations/` sur ton projet (manuel, ou automatique
+  quand une migration change sur `main`).
+
+Secrets à créer (Settings → Secrets and variables → Actions) :
+
+| Secret | Pour | Contenu |
+|---|---|---|
+| `SUPABASE_URL`, `SUPABASE_ANON_KEY` | APK | URL du projet + clé anon (Project Settings → API) |
+| `SUPABASE_ACCESS_TOKEN`, `SUPABASE_PROJECT_REF`, `SUPABASE_DB_PASSWORD` | déploiement base | jeton personnel, identifiant du projet, mot de passe de la base |
+| `AFRCHAT_TURN_URL`, `_USERNAME`, `_CREDENTIAL` | APK (optionnel) | identifiants TURN pour les appels |
+| `AFRCHAT_KEYSTORE_BASE64`, `AFRCHAT_STORE_PASSWORD`, `AFRCHAT_KEY_ALIAS`, `AFRCHAT_KEY_PASSWORD` | APK release signé (optionnel, les 4 ensemble) | `base64 -w0 afrchat.jks` + mots de passe |
+
+Récupérer l'APK : onglet **Actions → run → Artifacts**, ou (conseillé sur téléphone) crée un tag :
+`git tag v1.0.0 && git push origin v1.0.0` → l'APK est dans les **Releases** du dépôt.
+Sans `SUPABASE_URL`/`SUPABASE_ANON_KEY`, le build compile mais l'artifact s'appelle
+`AFR-CHAT-debug-SANS-SUPABASE` et l'APK ne peut pas se connecter. Le `versionCode` suit le numéro de run.
+
+## 7. Premier administrateur
+
+Inscris-toi dans l'app, puis exécute dans **Supabase → SQL Editor** (en remplaçant l'e-mail) le contenu
+de `supabase/bootstrap-admin.sql` :
+
+```sql
+update public.profiles set is_admin = true
+ where id = (select id from auth.users where email = 'TON_EMAIL@exemple.com');
 ```
-Le UID se trouve dans Firebase Authentication → l'onglet Users, ou dans Firestore
-`users/{uid}`. Une fois ce script exécuté, reconnecte-toi dans l'app : le bouton "Espace
-administrateur" apparaît sur l'écran de profil.
+Reconnecte-toi : le bouton « Espace administrateur » apparaît sur l'écran de profil.
 
-## 9. Checklist de vérification manuelle
-
-Cette checklist correspond point par point à la demande initiale. Comme le projet n'a pas pu
-être compilé dans cet environnement, **coche-la toi-même une fois le build lancé** — chaque point
-correspond à du code réellement écrit, pas à une promesse :
-
-- [ ] Le projet compile sans erreur (`./gradlew assembleDebug`)
-- [ ] L'application démarre sur un appareil/émulateur
-- [ ] Inscription d'un nouveau compte fonctionne
-- [ ] Connexion / déconnexion fonctionnent
-- [ ] Envoi d'un message texte entre deux comptes fonctionne
-- [ ] Réception en temps réel (sans recharger l'app) fonctionne
-- [ ] Une notification apparaît pour un nouveau message (app en arrière-plan)
-- [ ] Création d'un groupe et envoi d'un message de groupe fonctionnent
-- [ ] Envoi d'une image fonctionne (aperçu + upload + réception)
-- [ ] Un appel audio/vidéo s'établit entre deux appareils (avec TURN configuré si réseaux
-      différents)
-- [ ] Un statut publié apparaît chez les contacts et disparaît après 24h
-
-## 10. Structure du projet
+## 8. Structure
 
 ```
 AFR-CHAT/
-├── app/                         Application Android
-│   └── src/main/
-│       ├── java/com/afrchat/app/
-│       │   ├── data/            Modèles + Repositories (accès Firebase)
-│       │   ├── di/               Injection de dépendances (Hilt)
-│       │   ├── navigation/       Graphe de navigation Compose
-│       │   ├── service/          FCM, appel en premier plan, hors-ligne
-│       │   ├── ui/               Écrans Compose + ViewModels, par fonctionnalité
-│       │   └── utils/            Constantes, validateurs, formatage
-│       └── res/                  Ressources (couleurs, chaînes, icônes)
-├── firebase/
-│   ├── firestore.rules           Règles de sécurité Firestore
-│   ├── storage.rules             Règles de sécurité Storage
-│   ├── firestore.indexes.json    Index composites requis
-│   ├── functions/                Cloud Functions (notifications, admin, nettoyage statuts)
-│   └── scripts/bootstrap-admin.js
-├── ARCHITECTURE.md               Détail de l'architecture et du schéma de données
-└── README.md                     Ce fichier
+├── app/src/main/java/com/afrchat/app/
+│   ├── data/model/        Modèles de l'app
+│   ├── data/remote/       DTO Postgres (snake_case) + pont Realtime
+│   ├── data/repository/   Accès Supabase (Auth, PostgREST, RPC, Storage)
+│   ├── service/           Notifications locales, appel en premier plan, resynchronisation
+│   ├── ui/ · navigation/ · di/ · utils/
+├── supabase/
+│   ├── migrations/        Schéma, RLS, RPC, Realtime, Storage, pg_cron
+│   ├── bootstrap-admin.sql
+│   └── config.toml
+├── .github/workflows/     build-apk.yml · supabase-deploy.yml
+├── ARCHITECTURE.md
+└── README.md
 ```
-
----
-
-**Identité visuelle** — Nom : *AFR CHAT*. Palette originale : violet-indigo `#5B4FE9` (primaire),
-corail `#FF7A59` (accent), avec variante sombre dédiée. Logo original (bulle de discussion +
-étincelle de connexion) en `app/src/main/res/drawable/ic_launcher_foreground.xml`, sans lien
-avec l'identité visuelle de WhatsApp ou de toute autre application tierce.

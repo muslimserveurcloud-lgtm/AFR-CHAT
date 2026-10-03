@@ -5,17 +5,13 @@ import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.os.Build
 import androidx.work.Configuration
-import com.google.firebase.appcheck.FirebaseAppCheck
-import com.google.firebase.appcheck.playintegrity.PlayIntegrityAppCheckProviderFactory
-import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.firestore.FirebaseFirestoreSettings
 import dagger.hilt.android.HiltAndroidApp
 import javax.inject.Inject
 
 /**
  * Point d'entrée de l'application AFR CHAT.
- * Initialise Hilt, Firebase App Check (anti-abus), la persistance Firestore hors-ligne
- * et les canaux de notification.
+ * Initialise Hilt (le client Supabase est créé à la demande, voir di/AppModule.kt),
+ * WorkManager et les canaux de notification.
  */
 @HiltAndroidApp
 class AfrChatApplication : Application(), Configuration.Provider {
@@ -24,19 +20,6 @@ class AfrChatApplication : Application(), Configuration.Provider {
 
     override fun onCreate() {
         super.onCreate()
-
-        // Active la persistance locale Firestore : les messages restent lisibles hors-ligne
-        // et les écritures faites sans réseau sont automatiquement rejouées à la reconnexion.
-        FirebaseFirestore.getInstance().firestoreSettings = FirebaseFirestoreSettings.Builder()
-            .setLocalCacheSettings(
-                com.google.firebase.firestore.PersistentCacheSettings.newBuilder().build()
-            )
-            .build()
-
-        // App Check : empêche des clients non authentifiés/modifiés d'appeler notre backend Firebase.
-        FirebaseAppCheck.getInstance().installAppCheckProviderFactory(
-            PlayIntegrityAppCheckProviderFactory.getInstance()
-        )
 
         createNotificationChannels()
     }

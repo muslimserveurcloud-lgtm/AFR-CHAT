@@ -1,6 +1,6 @@
 package com.afrchat.app.data.model
 
-/** Représente un utilisateur AFR CHAT. Stocké dans la collection Firestore "users/{uid}". */
+/** Représente un utilisateur AFR CHAT. Table Supabase "profiles" (id = uid Supabase Auth). */
 data class User(
     val uid: String = "",
     val firstName: String = "",
@@ -11,7 +11,6 @@ data class User(
     val statusMessage: String = "Salut, j'utilise AFR CHAT !",
     val isOnline: Boolean = false,
     val lastSeen: Long = 0L,
-    val fcmTokens: List<String> = emptyList(),
     val privacy: PrivacySettings = PrivacySettings(),
     val isAdmin: Boolean = false,
     val isBanned: Boolean = false,

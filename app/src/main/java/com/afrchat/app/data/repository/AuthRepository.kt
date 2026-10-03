@@ -1,34 +1,38 @@
 package com.afrchat.app.data.repository
 
 import com.afrchat.app.data.model.AfrResult
-import com.afrchat.app.data.model.PrivacySettings
-import com.afrchat.app.data.model.User
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.FirebaseFirestore
-import kotlinx.coroutines.tasks.await
+import io.github.jan.supabase.SupabaseClient
+import io.github.jan.supabase.auth.auth
+import io.github.jan.supabase.auth.providers.builtin.Email
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Gère l'inscription, la connexion, la déconnexion et la session utilisateur
- * via Firebase Authentication (e-mail/mot de passe).
- * Le maintien de session est natif à Firebase Auth (jeton rafraîchi automatiquement).
+ * Inscription, connexion, déconnexion et session via Supabase Auth (e-mail / mot de passe).
+ * La session est persistée localement et rafraîchie automatiquement par supabase-kt.
+ * Le profil (table "profiles") est créé côté serveur par le trigger handle_new_user.
  */
 @Singleton
 class AuthRepository @Inject constructor(
-    private val auth: FirebaseAuth,
-    private val firestore: FirebaseFirestore
+    private val client: SupabaseClient
 ) {
-    val currentUserId: String? get() = auth.currentUser?.uid
-    val isLoggedIn: Boolean get() = auth.currentUser != null
+    private val auth get() = client.auth
 
-    fun observeAuthState(onChanged: (Boolean) -> Unit): FirebaseAuth.AuthStateListener {
-        val listener = FirebaseAuth.AuthStateListener { onChanged(it.currentUser != null) }
-        auth.addAuthStateListener(listener)
-        return listener
+    val currentUserId: String? get() = auth.currentUserOrNull()?.id
+    val currentEmail: String get() = auth.currentUserOrNull()?.email.orEmpty()
+    val isLoggedIn: Boolean get() = auth.currentSessionOrNull() != null
+
+    /** true / false à chaque changement de session (connexion, déconnexion, expiration). */
+    val isLoggedInFlow: Flow<Boolean> = auth.sessionStatus.map { auth.currentSessionOrNull() != null }
+
+    /** Attend que la session sauvegardée soit chargée au démarrage de l'app. */
+    suspend fun awaitReady() {
+        try { auth.awaitInitialization() } catch (_: Exception) { }
     }
-
-    fun removeAuthListener(listener: FirebaseAuth.AuthStateListener) = auth.removeAuthStateListener(listener)
 
     suspend fun signUp(
         firstName: String,
@@ -36,59 +40,61 @@ class AuthRepository @Inject constructor(
         email: String,
         password: String,
         phone: String = ""
-    ): AfrResult<String> {
-        return try {
-            val result = auth.createUserWithEmailAndPassword(email, password).await()
-        val uid = result.user?.uid ?: return AfrResult.Error("Impossible de créer le compte.")
-
-        val user = User(
-            uid = uid,
-            firstName = firstName,
-            lastName = lastName,
-            email = email,
-            phone = phone,
-            privacy = PrivacySettings()
-        )
-        firestore.collection("users").document(uid).set(user).await()
-        AfrResult.Success(uid)
-        } catch (e: Exception) {
-            AfrResult.Error(mapAuthError(e), e)
+    ): AfrResult<String> = try {
+        val info = auth.signUpWith(Email) {
+            this.email = email
+            this.password = password
+            data = buildJsonObject {
+                put("first_name", firstName)
+                put("last_name", lastName)
+                put("phone", phone)
+            }
         }
+        val uid = auth.currentUserOrNull()?.id
+        when {
+            uid != null -> AfrResult.Success(uid)
+            // Confirmation par e-mail activée côté Supabase : le compte existe mais pas encore de session.
+            info != null -> AfrResult.Error("Compte créé ! Confirme ton adresse e-mail (lien reçu par mail), puis connecte-toi.")
+            else -> AfrResult.Error("Impossible de créer le compte.")
+        }
+    } catch (e: Exception) {
+        AfrResult.Error(mapAuthError(e), e)
     }
 
-    suspend fun login(email: String, password: String): AfrResult<String> {
-        return try {
-            val result = auth.signInWithEmailAndPassword(email, password).await()
-            AfrResult.Success(result.user?.uid.orEmpty())
-        } catch (e: Exception) {
-            AfrResult.Error(mapAuthError(e), e)
+    suspend fun login(email: String, password: String): AfrResult<String> = try {
+        auth.signInWith(Email) {
+            this.email = email
+            this.password = password
         }
+        AfrResult.Success(auth.currentUserOrNull()?.id.orEmpty())
+    } catch (e: Exception) {
+        AfrResult.Error(mapAuthError(e), e)
     }
 
-    suspend fun sendPasswordReset(email: String): AfrResult<Unit> {
-        return try {
-            auth.sendPasswordResetEmail(email).await()
-            AfrResult.Success(Unit)
-        } catch (e: Exception) {
-            AfrResult.Error(mapAuthError(e), e)
-        }
+    suspend fun sendPasswordReset(email: String): AfrResult<Unit> = try {
+        auth.resetPasswordForEmail(email)
+        AfrResult.Success(Unit)
+    } catch (e: Exception) {
+        AfrResult.Error(mapAuthError(e), e)
     }
 
-    fun logout() {
-        auth.currentUser?.uid?.let { uid ->
-            // Le statut hors-ligne est mis à jour par UserRepository avant l'appel à logout().
-        }
-        auth.signOut()
+    suspend fun logout() {
+        try { auth.signOut() } catch (_: Exception) { }
     }
 
-    /** Traduit les erreurs Firebase en messages compréhensibles, en français, pour l'utilisateur. */
-    private fun mapAuthError(e: Exception): String = when {
-        e.message?.contains("badly formatted", true) == true -> "L'adresse e-mail n'est pas valide."
-        e.message?.contains("email address is already in use", true) == true -> "Cet e-mail est déjà utilisé."
-        e.message?.contains("password is invalid", true) == true -> "Mot de passe incorrect."
-        e.message?.contains("no user record", true) == true -> "Aucun compte associé à cet e-mail."
-        e.message?.contains("WEAK_PASSWORD", true) == true -> "Le mot de passe doit contenir au moins 6 caractères."
-        e.message?.contains("network", true) == true -> "Vérifiez votre connexion internet."
-        else -> "Une erreur est survenue. Veuillez réessayer."
+    /** Traduit les erreurs Supabase Auth en messages compréhensibles, en français. */
+    private fun mapAuthError(e: Exception): String {
+        val m = e.message.orEmpty()
+        return when {
+            m.contains("invalid login credentials", true) -> "E-mail ou mot de passe incorrect."
+            m.contains("email not confirmed", true) -> "Confirme d'abord ton adresse e-mail (lien reçu par mail)."
+            m.contains("already registered", true) || m.contains("already been registered", true) -> "Cet e-mail est déjà utilisé."
+            m.contains("password should be at least", true) || m.contains("weak_password", true) -> "Le mot de passe doit contenir au moins 6 caractères."
+            m.contains("valid email", true) || m.contains("invalid format", true) || m.contains("email_address_invalid", true) -> "L'adresse e-mail n'est pas valide."
+            m.contains("rate limit", true) || m.contains("over_email_send_rate_limit", true) -> "Trop de tentatives. Réessaie dans quelques minutes."
+            m.contains("banned", true) -> "Ce compte a été suspendu."
+            m.contains("unable to resolve host", true) || m.contains("timeout", true) || m.contains("network", true) -> "Vérifiez votre connexion internet."
+            else -> "Une erreur est survenue. Veuillez réessayer."
+        }
     }
 }

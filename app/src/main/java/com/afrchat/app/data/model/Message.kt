@@ -1,6 +1,6 @@
 package com.afrchat.app.data.model
 
-/** Message individuel. Sous-collection "conversations/{id}/messages/{messageId}". */
+/** Message individuel. Table "messages". */
 data class Message(
     val id: String = "",
     val conversationId: String = "",

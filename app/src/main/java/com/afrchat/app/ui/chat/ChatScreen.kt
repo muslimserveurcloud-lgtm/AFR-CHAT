@@ -11,9 +11,11 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.Call
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -29,6 +31,7 @@ import com.afrchat.app.ui.components.AvatarImage
 fun ChatScreen(
     peerName: String,
     onBack: () -> Unit,
+    onStartCall: (isVideo: Boolean, peerUid: String) -> Unit,
     onOpenGroupInfo: (groupId: String) -> Unit,
     viewModel: ChatViewModel = hiltViewModel()
 ) {
@@ -67,6 +70,8 @@ fun ChatScreen(
                             Icon(Icons.Filled.Info, contentDescription = "Infos du groupe")
                         }
                     }
+                    IconButton(onClick = { onStartCall(false, state.peerUid) }) { Icon(Icons.Filled.Call, contentDescription = "Appel audio") }
+                    IconButton(onClick = { onStartCall(true, state.peerUid) }) { Icon(Icons.Filled.Videocam, contentDescription = "Appel vidéo") }
                 }
             )
         },

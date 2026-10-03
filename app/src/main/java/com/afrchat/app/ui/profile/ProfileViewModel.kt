@@ -29,6 +29,8 @@ class ProfileViewModel @Inject constructor(
     private val _user = MutableStateFlow<User?>(null)
     val user: StateFlow<User?> = _user.asStateFlow()
 
+    val myEmail: String get() = authRepository.currentEmail
+
     var uploadProgress by mutableStateOf<Int?>(null)
         private set
 
@@ -50,14 +52,7 @@ class ProfileViewModel @Inject constructor(
 
     fun updatePrivacy(privacy: PrivacySettings) {
         val uid = authRepository.currentUserId ?: return
-        viewModelScope.launch {
-            userRepository.updateProfile(uid, mapOf(
-                "privacy.showLastSeen" to privacy.showLastSeen,
-                "privacy.showOnlineStatus" to privacy.showOnlineStatus,
-                "privacy.showReadReceipts" to privacy.showReadReceipts,
-                "privacy.whoCanAddToGroups" to privacy.whoCanAddToGroups
-            ))
-        }
+        viewModelScope.launch { userRepository.updatePrivacy(uid, privacy) }
     }
 
     fun updatePhoto(context: Context, uri: Uri) {

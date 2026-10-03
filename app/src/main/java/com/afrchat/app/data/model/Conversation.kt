@@ -1,6 +1,6 @@
 package com.afrchat.app.data.model
 
-/** Discussion privée (1-à-1) ou entrée de liste pour un groupe. Collection "conversations/{id}". */
+/** Discussion privée (1-à-1) ou entrée de liste pour un groupe. Tables "conversations" + "conversation_members". */
 data class Conversation(
     val id: String = "",
     val type: String = "private", // "private" | "group"

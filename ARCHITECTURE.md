@@ -5,115 +5,72 @@
 ```
 Android (Kotlin, Jetpack Compose, MVVM)
         │
-        ├── Firebase Authentication  → comptes utilisateurs (e-mail / mot de passe)
-        ├── Cloud Firestore          → données temps réel (conversations, messages, groupes…)
-        ├── Firebase Storage         → médias (images, vidéos, fichiers, vocaux, photos)
-        ├── Firebase Cloud Messaging → notifications push
-        ├── Cloud Functions          → logique serveur sensible (modération, notifications,
-        │                              nettoyage des statuts expirés)
-        └── WebRTC (pair-à-pair)     → flux audio/vidéo des appels, signalisation via Firestore
+        ├── Supabase Auth        → comptes (e-mail / mot de passe), session persistée
+        ├── Supabase Postgres    → données (PostgREST + fonctions RPC), sécurisées par RLS
+        ├── Supabase Realtime    → flux temps réel (messages, conversations, appels, statuts)
+        ├── Supabase Storage     → médias (bucket public "media", écriture limitée à son dossier)
+        ├── pg_cron              → purge horaire des statuts expirés
+        └── WebRTC (pair-à-pair) → flux audio/vidéo, signalisation via les tables calls / call_candidates
 ```
 
-Couche par couche (MVVM + Repository) :
-
 ```
-ui/{feature}/*Screen.kt        → Composables (affichage uniquement)
-ui/{feature}/*ViewModel.kt     → état UI + logique de présentation (Hilt ViewModel)
-data/repository/*Repository.kt → accès aux données, une seule source de vérité par domaine
-data/model/*.kt                → modèles de données (Firestore-serializable data classes)
-di/AppModule.kt                 → fourniture des instances Firebase (Hilt)
+ui/{feature}/*Screen.kt        → Composables
+ui/{feature}/*ViewModel.kt     → état UI (Hilt ViewModel)
+data/repository/*Repository.kt → accès aux données (seule couche qui connaît Supabase)
+data/remote/*                  → DTO Postgres + RealtimeHub
+data/model/*.kt                → modèles de l'app (indépendants du backend)
 ```
 
-Chaque écran observe un `StateFlow` exposé par son ViewModel ; le ViewModel ne connaît jamais
-Firebase directement, il passe toujours par un repository — ce qui permet de remplacer Firebase
-par un autre backend plus tard sans toucher à l'UI.
+Les ViewModels ne connaissent jamais Supabase : ils passent par les repositories.
 
-## 2. Structure de la base de données (Cloud Firestore)
+## 2. Schéma (supabase/migrations)
 
-```
-users/{uid}
-  firstName, lastName, email, phone, photoUrl, statusMessage,
-  isOnline, lastSeen, fcmTokens[], privacy{}, isAdmin, isBanned,
-  firstNameLower, lastNameLower   (maintenus par la Cloud Function onUserWrite, pour la recherche)
-  └── notifications/{id}          (optionnel, accusés de notification)
+| Table | Rôle |
+|---|---|
+| `profiles` | 1 ligne par compte (`id` = `auth.users.id`), créée par le trigger `handle_new_user`. Colonnes `first_name_lower` / `last_name_lower` générées pour la recherche par préfixe. |
+| `conversations` + `conversation_members` | conversation (privée ou groupe) ; les compteurs non-lus, archivage, sourdine et « écrit… » sont **par membre**. |
+| `messages` | un message par ligne ; le trigger `on_message_insert` met à jour l'aperçu de la conversation et les non-lus. Index unique anti-doublon sur `client_temp_id`. |
+| `groups` + `group_members` | groupe et rôles (`owner` / `admin` / `member`). |
+| `stories` | statuts, `expires_at` en ms, purgés chaque heure. |
+| `calls` + `call_candidates` | signalisation WebRTC (offre/réponse SDP, candidats ICE). |
+| `reports` | signalements, lisibles uniquement par les admins. |
 
-conversations/{id}
-  type: "private" | "group", participantIds[], groupId?,
-  lastMessage, lastMessageType, lastMessageSenderId, lastMessageAt,
-  unreadCount{uid: n}, typingUserIds[], isArchived{uid: bool}, isMuted{uid: bool}
-  └── messages/{id}
-        senderId, type, text, mediaUrl, fileName, replyToMessageId,
-        reactions{uid: emoji}, status, deletedFor[], isDeletedForEveryone, sentAt
+Les horodatages sont des **millisecondes epoch** (`bigint`) pour coller aux modèles Kotlin.
 
-groups/{id}
-  name, description, photoUrl, ownerUid, adminUids[], memberUids[],
-  onlyAdminsCanPost, onlyAdminsCanEditInfo, conversationId
+## 3. Temps réel
 
-stories/{id}
-  ownerUid, type, content, mediaUrl, backgroundColor,
-  viewerUids[], createdAt, expiresAt   (nettoyage auto par Cloud Function planifiée)
-
-calls/{id}
-  callerUid, calleeUid, isVideo, status, offerSdp, answerSdp, createdAt, endedAt
-  ├── callerCandidates/{id}   (candidats ICE du demandeur)
-  └── calleeCandidates/{id}   (candidats ICE du destinataire)
-
-reports/{id}
-  reporterUid, targetType, targetId, reason, details, status, createdAt
-```
-
-### Pourquoi cette structure ?
-- **`conversations` séparée de `messages`** (sous-collection) : permet de lister rapidement les
-  discussions (un seul document léger par conversation) sans charger tout l'historique, et de
-  paginer les messages indépendamment.
-- **`unreadCount` par uid dans le document conversation** : évite de compter les messages non lus
-  à chaque affichage (coûteux), le compteur est incrémenté/désincrémenté directement.
-- **`groups` séparé de `conversations`** : un groupe a un cycle de vie propre (membres, rôles,
-  paramètres) indépendant de la discussion elle-même ; la conversation de groupe référence son
-  `groupId`.
-- **`calls` avec sous-collections de candidats ICE séparées par rôle** : évite les conflits
-  d'écriture concurrente entre l'appelant et l'appelé pendant la négociation WebRTC.
-
-## 3. Mode hors-ligne
-
-La persistance locale Firestore est activée (`AfrChatApplication.onCreate`) : les lectures sont
-servies depuis le cache local quand le réseau est indisponible, et les écritures (nouveaux
-messages, réactions, etc.) sont mises en file d'attente localement puis rejouées automatiquement
-à la reconnexion — sans code supplémentaire à écrire pour chaque fonctionnalité. `ConnectivityObserver`
-expose l'état réseau pour afficher un bandeau "hors ligne" dans l'UI si souhaité, et
-`OfflineMessageSyncWorker` (WorkManager) republie le statut "en ligne" et rafraîchit le jeton FCM
-après une coupure prolongée.
+`RealtimeHub` s'abonne aux changements Postgres des tables concernées ; à chaque événement, le
+repository relance sa requête de lecture et émet le résultat dans un `Flow`. C'est volontairement
+simple : un seul code de lecture, pas de reconstruction manuelle d'état à partir des événements.
+La RLS s'applique aussi à Realtime : on ne reçoit que les changements des lignes qu'on a le droit de lire.
 
 ## 4. Sécurité
 
-- **Authentification** : Firebase Authentication (e-mail/mot de passe), jeton rafraîchi
-  automatiquement, session maintenue nativement.
-- **Autorisations serveur** : `firebase/firestore.rules` et `firebase/storage.rules` empêchent
-  tout accès aux données d'un autre utilisateur (voir commentaires dans ces fichiers).
-- **Modération/admin** : jamais côté client. Toute action sensible (bannir, changer un rôle admin,
-  traiter un signalement) passe par une Cloud Function *callable* qui vérifie le custom claim
-  Firebase Auth `admin` côté serveur (`firebase/functions/index.js`).
-- **App Check** (Play Integrity) : empêche des clients non authentifiés/modifiés d'appeler le
-  backend Firebase.
-- **Aucun secret dans le code source** : les identifiants Firebase viennent de
-  `google-services.json` (fichier local, non committé) ; les identifiants TURN sont à renseigner
-  dans `utils/Constants.kt` (voir README).
-- **Chiffrement de bout en bout** : **non implémenté** dans cette version. Les données transitent
-  en TLS entre l'app et Firebase (chiffrement en transit) et sont chiffrées au repos par Firebase,
-  mais Firebase (donc l'opérateur du projet) peut techniquement lire le contenu des messages
-  côté serveur. Ne prétends jamais à un chiffrement de bout en bout tant que cette fonctionnalité
-  n'est pas ajoutée explicitement (voir section "Limitations" du README).
+- **RLS activée sur toutes les tables.** Lecture limitée aux membres (conversations, messages, groupes),
+  aux participants (appels) ou aux admins (signalements).
+- **Écritures sensibles via RPC `security definer`** (création de groupe, rôles, bannissement,
+  marquage « lu »…) qui revérifient les droits côté serveur. Les privilèges directs INSERT/UPDATE/DELETE
+  sont révoqués sur ces tables.
+- **Un utilisateur ne peut modifier sur `profiles` que** `first_name, last_name, phone, photo_url,
+  status_message, is_online, last_seen, privacy` (privilèges de colonnes) : jamais `is_admin` / `is_banned`.
+- **Bannissement** : `profiles.is_banned` + `auth.users.banned_until` (la session ne se rafraîchit plus).
+- **Clé anon** dans l'APK : publique par conception. Ne jamais embarquer la clé `service_role`.
+- **Storage** : un utilisateur ne peut écrire/supprimer que dans `{dossier}/{son uid}/…`. Le bucket est
+  public en lecture : les URL contiennent un UUID impossible à deviner, mais quiconque possède une URL
+  peut la lire. Pour des médias réellement privés, passer à un bucket privé + URL signées (non fait ici).
+- **Chiffrement de bout en bout : non implémenté.** Ne jamais prétendre le contraire.
 
 ## 5. Appels audio/vidéo (WebRTC)
 
-1. L'appelant crée un document `calls/{id}` avec son offre SDP.
-2. Une Cloud Function (`onIncomingCall`) notifie le destinataire par push.
-3. Le destinataire répond (accepte/refuse) : sa réponse SDP est écrite dans le même document.
-4. Les candidats ICE de chaque côté sont échangés via les sous-collections
-   `callerCandidates`/`calleeCandidates`.
-5. Une fois la négociation terminée, l'audio/vidéo circule **directement entre les deux
-   téléphones** (pair-à-pair) — Firestore n'est utilisé que pour la signalisation, jamais pour le
-   flux média lui-même.
+1. L'appelant crée une ligne `calls` (id généré côté app) avec son offre SDP.
+2. Le destinataire, abonné via Realtime à ses appels « ringing » récents (< 1 min), voit l'écran d'appel
+   entrant — **uniquement si l'app tourne** (pas de push).
+3. Il répond : `status = accepted` + `answer_sdp` dans la même ligne.
+4. Les candidats ICE passent par `call_candidates` (`from_role` = caller / callee).
+5. Le flux audio/vidéo circule ensuite directement entre les deux téléphones. Un serveur TURN est
+   nécessaire pour les réseaux restrictifs (voir README).
 
-Un serveur TURN est nécessaire pour les cas où une connexion directe est impossible (la plupart
-des réseaux mobiles/Wi-Fi grand public). Voir le README pour la configuration.
+## 6. Notifications
+
+Notifications locales (`MessageNotifier`) alimentées par Realtime : le contenu du message n'est jamais
+affiché, seulement le nom de l'expéditeur. Pas de push app fermée (limitation Supabase, voir README).

@@ -1,22 +1,46 @@
 package com.afrchat.app.di
 
-import com.google.firebase.auth.FirebaseAuth
-import com.google.firebase.firestore.FirebaseFirestore
-import com.google.firebase.functions.FirebaseFunctions
-import com.google.firebase.messaging.FirebaseMessaging
-import com.google.firebase.storage.FirebaseStorage
+import com.afrchat.app.BuildConfig
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.components.SingletonComponent
+import io.github.jan.supabase.SupabaseClient
+import io.github.jan.supabase.auth.Auth
+import io.github.jan.supabase.createSupabaseClient
+import io.github.jan.supabase.postgrest.Postgrest
+import io.github.jan.supabase.realtime.Realtime
+import io.github.jan.supabase.serializer.KotlinXSerializer
+import kotlinx.serialization.json.Json
+import okhttp3.OkHttpClient
+import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
 
 @Module
 @InstallIn(SingletonComponent::class)
 object AppModule {
-    @Provides @Singleton fun provideAuth(): FirebaseAuth = FirebaseAuth.getInstance()
-    @Provides @Singleton fun provideFirestore(): FirebaseFirestore = FirebaseFirestore.getInstance()
-    @Provides @Singleton fun provideStorage(): FirebaseStorage = FirebaseStorage.getInstance()
-    @Provides @Singleton fun provideMessaging(): FirebaseMessaging = FirebaseMessaging.getInstance()
-    @Provides @Singleton fun provideFunctions(): FirebaseFunctions = FirebaseFunctions.getInstance("europe-west1")
+
+    /** Client Supabase unique : Auth (session persistée), Postgres (PostgREST + RPC) et Realtime. */
+    @Provides @Singleton
+    fun provideSupabase(): SupabaseClient = createSupabaseClient(
+        supabaseUrl = BuildConfig.SUPABASE_URL,
+        supabaseKey = BuildConfig.SUPABASE_ANON_KEY
+    ) {
+        defaultSerializer = KotlinXSerializer(Json {
+            ignoreUnknownKeys = true
+            encodeDefaults = true
+            coerceInputValues = true
+        })
+        install(Auth)
+        install(Postgrest)
+        install(Realtime)
+    }
+
+    /** Client HTTP pour les uploads/suppressions de fichiers (Supabase Storage via REST). */
+    @Provides @Singleton
+    fun provideOkHttp(): OkHttpClient = OkHttpClient.Builder()
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .writeTimeout(5, TimeUnit.MINUTES)
+        .readTimeout(2, TimeUnit.MINUTES)
+        .build()
 }

@@ -1,11 +1,17 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
-    id("com.google.gms.google-services")
     id("com.google.dagger.hilt.android")
     id("org.jetbrains.kotlin.plugin.serialization")
     id("com.google.devtools.ksp")
 }
+
+// Lit une valeur de config : variable d'environnement (CI), sinon propriété Gradle
+// (~/.gradle/gradle.properties ou -P), sinon valeur par défaut.
+fun cfg(name: String, default: String): String =
+    System.getenv(name)?.takeIf { it.isNotBlank() }
+        ?: (project.findProperty(name) as String?)?.takeIf { it.isNotBlank() }
+        ?: default
 
 android {
     namespace = "com.afrchat.app"
@@ -19,8 +25,21 @@ android {
         applicationId = "com.afrchat.app"
         minSdk = 24
         targetSdk = 35
-        versionCode = 1
+        // En CI, le numéro de run GitHub sert de versionCode : chaque APK est ainsi
+        // installable par-dessus le précédent (Android refuse un versionCode identique/inférieur).
+        versionCode = (System.getenv("GITHUB_RUN_NUMBER") ?: "1").toInt()
         versionName = "1.0.0"
+
+        // Supabase : URL du projet + clé "anon" (publique par conception ; la sécurité repose sur la RLS).
+        // Fournies par les secrets GitHub SUPABASE_URL / SUPABASE_ANON_KEY (ou gradle.properties en local).
+        buildConfigField("String", "SUPABASE_URL", "\"${cfg("SUPABASE_URL", "https://example.supabase.co")}\"")
+        buildConfigField("String", "SUPABASE_ANON_KEY", "\"${cfg("SUPABASE_ANON_KEY", "PLACEHOLDER_ANON_KEY")}\"")
+
+        // TURN (appels WebRTC) : injecté depuis les secrets GitHub / variables d'environnement.
+        // Valeurs par défaut = "A_CONFIGURER" (l'app retombe alors sur STUN seul).
+        buildConfigField("String", "TURN_URL", "\"${cfg("AFRCHAT_TURN_URL", "turn:TON_SERVEUR_TURN:3478")}\"")
+        buildConfigField("String", "TURN_USERNAME", "\"${cfg("AFRCHAT_TURN_USERNAME", "A_CONFIGURER")}\"")
+        buildConfigField("String", "TURN_CREDENTIAL", "\"${cfg("AFRCHAT_TURN_CREDENTIAL", "A_CONFIGURER")}\"")
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables { useSupportLibrary = true }
@@ -42,7 +61,6 @@ android {
 
     buildTypes {
         debug {
-            applicationIdSuffix = ".debug"
             isDebuggable = true
             buildConfigField("boolean", "IS_DEBUG", "true")
         }
@@ -51,7 +69,10 @@ android {
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             buildConfigField("boolean", "IS_DEBUG", "false")
-            signingConfig = signingConfigs.getByName("release")
+            // Signature uniquement si un keystore est fourni (sinon l'APK release reste non signé)
+            if (signingConfigs.getByName("release").storeFile != null) {
+                signingConfig = signingConfigs.getByName("release")
+            }
         }
     }
 
@@ -70,11 +91,13 @@ android {
     }
     kotlinOptions {
         jvmTarget = "17"
+        // supabase-kt est compilé avec une version de Kotlin plus récente que 1.9.24
+        freeCompilerArgs += "-Xskip-metadata-version-check"
     }
 
     packaging {
         resources {
-            excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            excludes += "/META-INF/{AL2.0,LGPL2.1,INDEX.LIST,DEPENDENCIES,io.netty.versions.properties}"
         }
     }
 }
@@ -101,19 +124,17 @@ dependencies {
     implementation("androidx.hilt:hilt-work:1.2.0")
     ksp("androidx.hilt:hilt-compiler:1.2.0")
 
-    // Firebase
-    implementation(platform("com.google.firebase:firebase-bom:33.3.0"))
-    implementation("com.google.firebase:firebase-auth-ktx")
-    implementation("com.google.firebase:firebase-firestore-ktx")
-    implementation("com.google.firebase:firebase-storage-ktx")
-    implementation("com.google.firebase:firebase-messaging-ktx")
-    implementation("com.google.firebase:firebase-functions-ktx")
-    implementation("com.google.firebase:firebase-analytics-ktx")
-    implementation("com.google.firebase:firebase-appcheck-playintegrity")
+    // Supabase (Auth + Postgres/PostgREST + Realtime) — le stockage de fichiers passe par OkHttp (REST)
+    implementation(platform("io.github.jan-tennert.supabase:bom:2.6.1"))
+    implementation("io.github.jan-tennert.supabase:postgrest-kt")
+    implementation("io.github.jan-tennert.supabase:auth-kt")
+    implementation("io.github.jan-tennert.supabase:realtime-kt")
+    implementation("io.ktor:ktor-client-okhttp:2.3.12")
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.1")
 
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-play-services:1.8.1")
 
     // Images
     implementation("io.coil-kt:coil-compose:2.7.0")
@@ -121,6 +142,8 @@ dependencies {
     // WorkManager (mode hors-ligne / synchronisation différée)
     implementation("androidx.work:work-runtime-ktx:2.9.1")
 
+    // WebRTC (appels audio/vidéo) — build maintenu par webrtc-sdk (miroir Google WebRTC pour Android)
+    implementation("io.github.webrtc-sdk:android:125.6422.07.1")
 
     // Permissions & médias
     implementation("androidx.exifinterface:exifinterface:1.3.7")

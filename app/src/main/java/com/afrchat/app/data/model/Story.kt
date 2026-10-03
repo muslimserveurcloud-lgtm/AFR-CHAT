@@ -1,6 +1,6 @@
 package com.afrchat.app.data.model
 
-/** Statut/story éphémère. Collection "stories/{id}", expire automatiquement via un champ TTL Firestore. */
+/** Statut/story éphémère. Table "stories", purgée toutes les heures (pg_cron) une fois expirée. */
 data class Story(
     val id: String = "",
     val ownerUid: String = "",
