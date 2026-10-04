@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
     id("com.google.dagger.hilt.android")
     id("org.jetbrains.kotlin.plugin.serialization")
     id("com.google.devtools.ksp")
@@ -81,18 +82,12 @@ android {
         buildConfig = true
     }
 
-    composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.14"
-    }
-
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions {
         jvmTarget = "17"
-        // supabase-kt est compilé avec une version de Kotlin plus récente que 1.9.24
-        freeCompilerArgs += "-Xskip-metadata-version-check"
     }
 
     packaging {
@@ -118,20 +113,20 @@ dependencies {
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     // Hilt (injection de dépendances)
-    implementation("com.google.dagger:hilt-android:2.51.1")
-    ksp("com.google.dagger:hilt-android-compiler:2.51.1")
+    implementation("com.google.dagger:hilt-android:2.52")
+    ksp("com.google.dagger:hilt-android-compiler:2.52")
     implementation("androidx.hilt:hilt-navigation-compose:1.2.0")
     implementation("androidx.hilt:hilt-work:1.2.0")
     ksp("androidx.hilt:hilt-compiler:1.2.0")
 
     // Supabase (Auth + Postgres/PostgREST + Realtime) — le stockage de fichiers passe par OkHttp (REST)
-    implementation(platform("io.github.jan-tennert.supabase:bom:2.6.1"))
+    implementation(platform("io.github.jan-tennert.supabase:bom:3.0.0"))
     implementation("io.github.jan-tennert.supabase:postgrest-kt")
     implementation("io.github.jan-tennert.supabase:auth-kt")
     implementation("io.github.jan-tennert.supabase:realtime-kt")
-    implementation("io.ktor:ktor-client-okhttp:2.3.12")
+    implementation("io.ktor:ktor-client-okhttp:3.0.3")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
 
     // Coroutines
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1")
@@ -143,7 +138,7 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.9.1")
 
     // WebRTC (appels audio/vidéo) — build maintenu par webrtc-sdk (miroir Google WebRTC pour Android)
-    implementation("io.github.webrtc-sdk:android:125.6422.07.1")
+    implementation("io.github.webrtc-sdk:android:125.6422.07")
 
     // Permissions & médias
     implementation("androidx.exifinterface:exifinterface:1.3.7")

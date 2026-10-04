@@ -5,7 +5,7 @@ WebRTC. Architecture MVVM / Repository, identité visuelle originale (voir `app/
 
 > ⚠️ **À lire avant tout** : ce projet a été migré de Firebase vers Supabase dans un environnement
 > sans accès réseau. **Le code n'a pas pu être compilé ni exécuté.** La migration utilise
-> `supabase-kt 2.6.1` ; si Gradle signale une erreur d'API ou de version, colle le message du log
+> `supabase-kt 3.0.0` (Kotlin 2.0.21, Ktor 3.0.3, WebRTC 125.6422.07) ; si Gradle signale une erreur d'API ou de version, colle le message du log
 > pour qu'on la corrige. Aucun APK n'a été généré automatiquement.
 
 ## Sommaire
