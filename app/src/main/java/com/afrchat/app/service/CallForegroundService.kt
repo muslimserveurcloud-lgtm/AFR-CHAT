@@ -8,7 +8,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
-import androidx.core.content.pm.ServiceInfo
+import android.content.pm.ServiceInfo
 import com.afrchat.app.MainActivity
 import com.afrchat.app.R
 

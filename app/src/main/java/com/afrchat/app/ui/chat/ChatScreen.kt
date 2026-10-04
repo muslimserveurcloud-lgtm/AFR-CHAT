@@ -26,6 +26,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.afrchat.app.ui.components.AvatarImage
+import androidx.compose.foundation.background
 
 @Composable
 fun ChatScreen(

@@ -73,8 +73,9 @@ class UserRepository @Inject constructor(
         } catch (_: Exception) { /* best-effort, ne bloque jamais l'UI */ }
     }
 
-    suspend fun searchUsers(query: String, excludeUid: String): AfrResult<List<User>> = try {
+    suspend fun searchUsers(query: String, excludeUid: String): AfrResult<List<User>> {
         if (query.isBlank()) return AfrResult.Success(emptyList())
+        return try {
         val trimmed = query.trim()
         val lower = trimmed.lowercase()
 
@@ -98,7 +99,8 @@ class UserRepository @Inject constructor(
         } else emptyList()
 
         AfrResult.Success((byFirst + byLast + byPhone).distinctBy { it.id }.map { it.toModel() })
-    } catch (e: Exception) {
-        AfrResult.Error("La recherche a échoué.", e)
+        } catch (e: Exception) {
+            AfrResult.Error("La recherche a échoué.", e)
+        }
     }
 }

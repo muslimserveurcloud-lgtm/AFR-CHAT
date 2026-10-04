@@ -28,11 +28,13 @@ class StoryListViewModel @Inject constructor(
     val stories: StateFlow<List<Story>> = _stories.asStateFlow()
 
     init {
-        val uid = authRepository.currentUserId ?: return
-        viewModelScope.launch {
-            chatRepository.observeConversations(uid).collect { conversations ->
-                val contactUids = conversations.flatMap { it.participantIds }.filter { it != uid }.distinct() + uid
-                storyRepository.observeActiveStories(contactUids).collect { _stories.value = it }
+        val uid = authRepository.currentUserId
+        if (uid != null) {
+            viewModelScope.launch {
+                chatRepository.observeConversations(uid).collect { conversations ->
+                    val contactUids = conversations.flatMap { it.participantIds }.filter { it != uid }.distinct() + uid
+                    storyRepository.observeActiveStories(contactUids).collect { _stories.value = it }
+                }
             }
         }
     }
