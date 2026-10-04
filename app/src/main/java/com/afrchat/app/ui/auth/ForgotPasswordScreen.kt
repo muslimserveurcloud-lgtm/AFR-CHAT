@@ -9,6 +9,8 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.afrchat.app.ui.components.AfrChatButton
 import com.afrchat.app.ui.components.AfrChatTextField
+import com.afrchat.app.ui.components.AuthHeader
+import androidx.compose.ui.text.input.KeyboardType
 
 @Composable
 fun ForgotPasswordScreen(
@@ -17,11 +19,9 @@ fun ForgotPasswordScreen(
 ) {
     val state = viewModel.uiState
     Column(modifier = Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center) {
-        Text("Récupérer mon compte", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(8.dp))
-        Text("Recevez un lien de réinitialisation par e-mail.", style = MaterialTheme.typography.bodyMedium)
-        Spacer(Modifier.height(24.dp))
-        AfrChatTextField(state.email, viewModel::onEmailChange, "Adresse e-mail")
+        AuthHeader("Récupérer mon compte", "Recevez un lien de réinitialisation par e-mail.")
+        Spacer(Modifier.height(28.dp))
+        AfrChatTextField(state.email, viewModel::onEmailChange, "Adresse e-mail", keyboardType = KeyboardType.Email)
 
         state.message?.let {
             Spacer(Modifier.height(8.dp))

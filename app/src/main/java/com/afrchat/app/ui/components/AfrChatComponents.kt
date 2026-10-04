@@ -26,6 +26,21 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.filled.ChatBubble
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.IconButton
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
 import com.afrchat.app.ui.theme.LocalAfrChatExtraColors
 
 /** Bouton principal réutilisable — identité visuelle AFR CHAT. */
@@ -61,8 +76,11 @@ fun AfrChatTextField(
     isError: Boolean = false,
     errorText: String? = null,
     isPassword: Boolean = false,
-    singleLine: Boolean = true
+    singleLine: Boolean = true,
+    keyboardType: KeyboardType = KeyboardType.Text,
+    leadingIcon: ImageVector? = null
 ) {
+    var passwordVisible by remember { mutableStateOf(false) }
     Box(modifier = modifier.fillMaxWidth()) {
         androidx.compose.foundation.layout.Column {
             OutlinedTextField(
@@ -71,15 +89,66 @@ fun AfrChatTextField(
                 label = { Text(label) },
                 isError = isError,
                 singleLine = singleLine,
-                visualTransformation = if (isPassword) androidx.compose.ui.text.input.PasswordVisualTransformation()
-                else androidx.compose.ui.text.input.VisualTransformation.None,
-                shape = RoundedCornerShape(12.dp),
+                visualTransformation = if (isPassword && !passwordVisible) PasswordVisualTransformation()
+                else VisualTransformation.None,
+                keyboardOptions = KeyboardOptions(keyboardType = if (isPassword) KeyboardType.Password else keyboardType),
+                leadingIcon = if (leadingIcon != null) {
+                    { Icon(leadingIcon, contentDescription = null) }
+                } else null,
+                trailingIcon = if (isPassword) {
+                    {
+                        IconButton(onClick = { passwordVisible = !passwordVisible }) {
+                            Icon(
+                                if (passwordVisible) Icons.Filled.VisibilityOff else Icons.Filled.Visibility,
+                                contentDescription = if (passwordVisible) "Masquer le mot de passe" else "Afficher le mot de passe"
+                            )
+                        }
+                    }
+                } else null,
+                shape = RoundedCornerShape(14.dp),
                 modifier = Modifier.fillMaxWidth()
             )
             if (isError && errorText != null) {
                 Text(errorText, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(start = 8.dp, top = 2.dp))
             }
         }
+    }
+}
+
+/** En-tête des écrans de connexion / inscription : badge de l'app, titre et sous-titre. */
+@Composable
+fun AuthHeader(title: String, subtitle: String, modifier: Modifier = Modifier) {
+    androidx.compose.foundation.layout.Column(
+        modifier = modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        Box(
+            modifier = Modifier
+                .size(72.dp)
+                .clip(RoundedCornerShape(22.dp))
+                .background(Brush.linearGradient(listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.secondary))),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(Icons.Filled.ChatBubble, contentDescription = null, tint = Color.White, modifier = Modifier.size(38.dp))
+        }
+        androidx.compose.foundation.layout.Spacer(Modifier.height(20.dp))
+        Text(title, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold, textAlign = TextAlign.Center)
+        androidx.compose.foundation.layout.Spacer(Modifier.height(6.dp))
+        Text(subtitle, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+    }
+}
+
+/** Message d'erreur dans un encadré lisible. */
+@Composable
+fun ErrorBanner(message: String, modifier: Modifier = Modifier) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .background(MaterialTheme.colorScheme.errorContainer)
+            .padding(12.dp)
+    ) {
+        Text(message, color = MaterialTheme.colorScheme.onErrorContainer, style = MaterialTheme.typography.bodyMedium)
     }
 }
 

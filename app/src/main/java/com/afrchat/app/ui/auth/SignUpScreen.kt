@@ -15,6 +15,9 @@ import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.afrchat.app.ui.components.AfrChatButton
 import com.afrchat.app.ui.components.AfrChatTextField
+import com.afrchat.app.ui.components.AuthHeader
+import com.afrchat.app.ui.components.ErrorBanner
+import androidx.compose.ui.text.input.KeyboardType
 
 @Composable
 fun SignUpScreen(
@@ -36,17 +39,16 @@ fun SignUpScreen(
         horizontalAlignment = Alignment.Start
     ) {
         Spacer(Modifier.height(24.dp))
-        Text("Créer un compte", style = MaterialTheme.typography.headlineLarge, fontWeight = FontWeight.Bold)
-        Text("Rejoins AFR CHAT en quelques secondes", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Spacer(Modifier.height(32.dp))
+        AuthHeader("Créer un compte", "Rejoins AFR CHAT en quelques secondes")
+        Spacer(Modifier.height(28.dp))
 
         AfrChatTextField(state.firstName, viewModel::onFirstNameChange, "Prénom", isError = state.fieldErrors.containsKey("firstName"), errorText = state.fieldErrors["firstName"])
         Spacer(Modifier.height(12.dp))
         AfrChatTextField(state.lastName, viewModel::onLastNameChange, "Nom", isError = state.fieldErrors.containsKey("lastName"), errorText = state.fieldErrors["lastName"])
         Spacer(Modifier.height(12.dp))
-        AfrChatTextField(state.email, viewModel::onEmailChange, "Adresse e-mail", isError = state.fieldErrors.containsKey("email"), errorText = state.fieldErrors["email"])
+        AfrChatTextField(state.email, viewModel::onEmailChange, "Adresse e-mail", keyboardType = KeyboardType.Email, isError = state.fieldErrors.containsKey("email"), errorText = state.fieldErrors["email"])
         Spacer(Modifier.height(12.dp))
-        AfrChatTextField(state.phone, viewModel::onPhoneChange, "Numéro de téléphone (facultatif)", isError = state.fieldErrors.containsKey("phone"), errorText = state.fieldErrors["phone"])
+        AfrChatTextField(state.phone, viewModel::onPhoneChange, "Numéro de téléphone (facultatif)", keyboardType = KeyboardType.Phone, isError = state.fieldErrors.containsKey("phone"), errorText = state.fieldErrors["phone"])
         Spacer(Modifier.height(12.dp))
         AfrChatTextField(state.password, viewModel::onPasswordChange, "Mot de passe", isPassword = true, isError = state.fieldErrors.containsKey("password"), errorText = state.fieldErrors["password"])
         Spacer(Modifier.height(12.dp))
@@ -62,8 +64,8 @@ fun SignUpScreen(
         }
 
         state.errorMessage?.let {
-            Spacer(Modifier.height(8.dp))
-            Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+            Spacer(Modifier.height(12.dp))
+            ErrorBanner(it)
         }
 
         Spacer(Modifier.height(24.dp))

@@ -54,7 +54,18 @@ class AuthRepository @Inject constructor(
         when {
             uid != null -> AfrResult.Success(uid)
             // Confirmation par e-mail activée côté Supabase : le compte existe mais pas encore de session.
-            info != null -> AfrResult.Error("Compte créé ! Confirme ton adresse e-mail (lien reçu par mail), puis connecte-toi.")
+            info != null -> {
+                // Compte créé mais pas de session (confirmation e-mail côté serveur) : on tente la connexion directe.
+                try {
+                    auth.signInWith(Email) {
+                        this.email = email
+                        this.password = password
+                    }
+                    AfrResult.Success(auth.currentUserOrNull()?.id.orEmpty())
+                } catch (_: Exception) {
+                    AfrResult.Error("Compte créé ! Confirme ton adresse e-mail (lien reçu par mail), puis connecte-toi.")
+                }
+            }
             else -> AfrResult.Error("Impossible de créer le compte.")
         }
     } catch (e: Exception) {
